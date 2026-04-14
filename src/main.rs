@@ -10,7 +10,7 @@ use std::collections::{HashSet, HashMap};
 use std::env;
 use std::fs;
 use std::fs::File;
-use std::io::{self, stdout, BufRead, BufReader, BufWriter, Cursor, Write};
+use std::io::{self, stdout, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -18,9 +18,6 @@ use std::time::{Duration, Instant};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
-
-use include_dir::{include_dir, Dir};
-static THEMES_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/themes");
 
 #[derive(PartialEq)]
 enum MenuState {
@@ -50,19 +47,44 @@ struct Editor {
     highlight_match: Option<(usize, usize, usize)>,
     highlight_cache: HashMap<usize, Vec<(Style, String)>>,
     current_theme: String,
+    is_justified: bool,                // New: tracks if ^J was just pressed
+    pre_justify_snapshot: Option<Rope>, // New: stores buffer state for undo
 }
 
 impl Editor {
     // --- Theme Persistence Helpers ---
-
-    fn get_config_path() -> Option<PathBuf> {
+    fn get_base_dir() -> Option<PathBuf> {
         let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
         if home.is_empty() {
             None
         } else {
-            Some(Path::new(&home).join(".ranorc"))
+            let path = Path::new(&home).join(".xnano");
+            // Create the directory if it doesn't exist
+            let _ = fs::create_dir_all(&path);
+            Some(path)
         }
     }
+
+    fn get_config_path() -> Option<PathBuf> {
+        Self::get_base_dir().map(|p| p.join("xnanorc"))
+    }
+
+    fn get_theme_dir() -> Option<PathBuf> {
+        Self::get_base_dir().map(|p| {
+            let theme_path = p.join("themes");
+            let _ = fs::create_dir_all(&theme_path);
+            theme_path
+        })
+    }
+
+    // fn get_config_path() -> Option<PathBuf> {
+    //     let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
+    //     if home.is_empty() {
+    //         None
+    //     } else {
+    //         Some(Path::new(&home).join(".ranorc"))
+    //     }
+    // }
 
     fn load_theme() -> String {
         if let Some(path) = Self::get_config_path() {
@@ -94,7 +116,7 @@ impl Editor {
     fn derive_ui_color(bg: syntect::highlighting::Color, is_dark: bool) -> Color {
         // If the theme is dark, we lighten the UI chrome slightly to offset it from the background.
         // If the theme is light, we darken it slightly to create a subtle shadow/border effect.
-        let offset: i16 = if is_dark { 12 } else { -15 };
+        let offset: i16 = if is_dark { 20 } else { -20 };
 
         let r = (bg.r as i16 + offset).clamp(0, 255) as u8;
         let g = (bg.g as i16 + offset).clamp(0, 255) as u8;
@@ -115,35 +137,39 @@ impl Editor {
             Rope::new()
         };
 
+        // Load default themes
         let mut theme_set = ThemeSet::load_defaults();
-        let mut themes_loaded = 0;
+        let mut initial_status = String::new();
 
-        // --- EMBEDDED THEME LOADING ---
-        // We iterate through the files baked into the binary via THEMES_DIR
-        for file in THEMES_DIR.files() {
-            if let Some(ext) = file.path().extension() {
-                if ext == "tmTheme" {
-                    // Get the theme name from the filename
-                    let theme_name = file.path().file_stem().unwrap().to_string_lossy().to_string();
-
-                    // Use a Cursor to treat the embedded bytes as a Read-able stream
-                    let mut reader = Cursor::new(file.contents());
-
-                    if let Ok(theme) = syntect::highlighting::ThemeSet::load_from_reader(&mut reader) {
-                        theme_set.themes.insert(theme_name, theme);
-                        themes_loaded += 1;
+        // Load custom themes from ~/.xnano/themes/
+        if let Some(theme_dir) = Self::get_theme_dir() {
+            match ThemeSet::load_from_folder(theme_dir) {
+                Ok(custom_themes) => {
+                    let count = custom_themes.themes.len();
+                    theme_set.themes.extend(custom_themes.themes);
+                    if count > 0 {
+                        initial_status = format!("Loaded {} custom themes from ~/.xnano/themes", count);
                     }
                 }
+                Err(_) => { /* Ignore empty or missing folder errors */ }
             }
         }
 
-        let initial_status = if themes_loaded > 0 {
-            format!("Loaded {} embedded themes.", themes_loaded)
-        } else {
-            String::from("No embedded themes found.")
-        };
-        // ------------------------------
+        // Attempt to load custom themes from a "themes" directory
+        match ThemeSet::load_from_folder("themes") {
+            Ok(custom_themes) => {
+                let count = custom_themes.themes.len();
+                theme_set.themes.extend(custom_themes.themes);
+                if count > 0 {
+                    // initial_status = format!("Loaded {} custom themes.", count);
+                }
+            }
+            Err(e) => {
+                initial_status = format!("Theme load error: {}", e);
+            }
+        }
 
+        // Load the persisted theme name, but fallback if it doesn't exist in the loaded set
         let mut starting_theme = Self::load_theme();
         if !theme_set.themes.contains_key(&starting_theme) {
             starting_theme = String::from("base16-ocean.dark");
@@ -169,67 +195,10 @@ impl Editor {
             highlight_match: None,
             highlight_cache: HashMap::new(),
             current_theme: starting_theme,
+            is_justified: false,
+            pre_justify_snapshot: None,
         }
     }
-
-    // fn new(filename: Option<String>) -> Self {
-    //     let buffer = if let Some(ref fname) = filename {
-    //         let expanded = Self::expand_tilde(fname);
-    //         if let Ok(file) = File::open(&expanded) {
-    //             Rope::from_reader(BufReader::new(file)).unwrap_or_default()
-    //         } else {
-    //             Rope::new()
-    //         }
-    //     } else {
-    //         Rope::new()
-    //     };
-    //
-    //     // Load default themes
-    //     let mut theme_set = ThemeSet::load_defaults();
-    //     let mut initial_status = String::new();
-    //
-    //     // Attempt to load custom themes from a "themes" directory
-    //     match ThemeSet::load_from_folder("themes") {
-    //         Ok(custom_themes) => {
-    //             let count = custom_themes.themes.len();
-    //             theme_set.themes.extend(custom_themes.themes);
-    //             if count > 0 {
-    //                 initial_status = format!("Loaded {} custom themes.", count);
-    //             }
-    //         }
-    //         Err(e) => {
-    //             initial_status = format!("Theme load error: {}", e);
-    //         }
-    //     }
-    //
-    //     // Load the persisted theme name, but fallback if it doesn't exist in the loaded set
-    //     let mut starting_theme = Self::load_theme();
-    //     if !theme_set.themes.contains_key(&starting_theme) {
-    //         starting_theme = String::from("base16-ocean.dark");
-    //     }
-    //
-    //     Self {
-    //         buffer,
-    //         cursor_x: 0,
-    //         cursor_y: 0,
-    //         desired_cursor_x: 0,
-    //         row_offset: 0,
-    //         filename,
-    //         should_quit: false,
-    //         status_message: initial_status,
-    //         status_time: Some(Instant::now()),
-    //         clipboard: String::new(),
-    //         dictionary: None,
-    //         syntax_set: SyntaxSet::load_defaults_newlines(),
-    //         theme_set,
-    //         is_modified: false,
-    //         last_search: None,
-    //         menu_state: MenuState::Default,
-    //         highlight_match: None,
-    //         highlight_cache: HashMap::new(),
-    //         current_theme: starting_theme,
-    //     }
-    // }
 
     fn clear_cache(&mut self) {
         self.highlight_cache.clear();
@@ -272,7 +241,7 @@ impl Editor {
 
         loop {
             if let Some(time) = self.status_time {
-                if time.elapsed() >= Duration::from_secs(5) {
+                if time.elapsed() >= Duration::from_secs(3) {
                     self.clear_status();
                 }
             }
@@ -284,10 +253,10 @@ impl Editor {
 
             let timeout = if let Some(time) = self.status_time {
                 let elapsed = time.elapsed();
-                if elapsed >= Duration::from_secs(5) {
+                if elapsed >= Duration::from_secs(3) {
                     Duration::from_millis(1)
                 } else {
-                    Duration::from_secs(5) - elapsed
+                    Duration::from_secs(3) - elapsed
                 }
             } else {
                 Duration::from_secs(3600)
@@ -374,14 +343,14 @@ impl Editor {
         let ui_bg = Self::derive_ui_color(raw_theme_bg, is_dark);
 
         // let ui_bg = if is_dark { Color::Rgb { r: 25, g: 25, b: 25 } } else { Color::Rgb { r: 230, g: 230, b: 230 } };
-        let title_fg = if is_dark { Color::Cyan } else { Color::Rgb { r: 0, g: 50, b: 150 } };
-        let menu_key_fg = if is_dark { Color::Cyan } else { Color::Rgb { r: 0, g: 100, b: 200 } };
+        let title_fg = if is_dark { Color::Reset } else { Color::Rgb { r: 0, g: 50, b: 150 } };
+        let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
         let menu_text_fg = if is_dark { Color::Reset } else { Color::Black };
 
         // 1. Draw Title Bar
         queue!(stdout, cursor::MoveTo(0, 0),
             SetBackgroundColor(ui_bg), SetForegroundColor(title_fg))?;
-        let title = "rano 1.0";
+        let title = "xnano";
         let file_display = self.filename.as_deref().unwrap_or("New Buffer");
 
         let center_start = (cols as usize).saturating_sub(file_display.len()) / 2;
@@ -427,7 +396,6 @@ impl Editor {
             self.syntax_set.find_syntax_plain_text()
         };
 
-        // Extract the theme's default global background (Used for filling the rest of the line)
         let theme_bg_raw = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
         let default_cross_bg = Color::Rgb { r: theme_bg_raw.r, g: theme_bg_raw.g, b: theme_bg_raw.b };
 
@@ -559,14 +527,29 @@ impl Editor {
         match self.menu_state {
             MenuState::Default => {
                 let menu1 = [
-                    ("^G", " Get Help"), ("^O", " Write Out"), ("^R", " Read File"), ("^Y", " Prev Pg"), ("^K", " Cut"), ("^C", " Cur Pos")
+                    ("^G", " Get Help"), ("^O", " Write Out"), ("^R", " Read File"),
+                    ("^Y", " Prev Pg"), ("^K", " Cut Txt"), ("^C", " Cur Pos")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
+                // Determine the label for ^U
+                let u_label = if self.is_justified { " Unjustify" } else { " UnCut Txt" };
+
                 let menu2 = [
-                    ("^X", " Exit"), ("^J", " Justify"), ("^W", " Where Is"), ("^V", " Next Pg"), ("^U", " UnCut"), ("^T", " To Spell")
+                    ("^X", " Exit"), ("^J", " Justify"), ("^W", " Where Is"),
+                    ("^V", " Next Pg"), ("^U", u_label), ("^T", " To Spell")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
+
+                // let menu1 = [
+                //     ("^G", " Get Help"), ("^O", " Write Out"), ("^R", " Read File"), ("^Y", " Prev Pg"), ("^K", " Cut Txt"), ("^C", " Cur Pos")
+                // ];
+                // Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
+                //
+                // let menu2 = [
+                //     ("^X", " Exit"), ("^J", " Justify"), ("^W", " Where Is"), ("^V", " Next Pg"), ("^U", " UnCut Txt"), ("^T", " To Spell")
+                // ];
+                // Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
             MenuState::YesNoCancel => {
                 let menu1 = [(" Y", " Yes")];
@@ -711,7 +694,7 @@ impl Editor {
 
     fn show_help(&mut self) -> io::Result<()> {
         let help_lines = [
-            "  rano 1.0 - Help",
+            "  Keybindings mimic those of nano.",
             "",
             "  Movement:",
             "    ^P, Up       Move up one line",
@@ -745,7 +728,7 @@ impl Editor {
             "    ^C, F11      Current Position",
             "    ^T, F12      To Spell (Spell check)",
             "    ^L, Alt-G    Go to line number",
-            "    Alt-T        Cycle Syntax Theme",
+            "    ^Z           Cycle Syntax Theme",
         ];
 
         let mut scroll_offset = 0;
@@ -760,7 +743,7 @@ impl Editor {
         let is_dark = Self::is_dark_theme(theme);
         // let ui_bg = if is_dark { Color::Rgb { r: 25, g: 25, b: 25 } } else { Color::Rgb { r: 230, g: 230, b: 230 } };
         let ui_bg = Self::derive_ui_color(bg, is_dark);
-        let menu_key_fg = if is_dark { Color::Cyan } else { Color::Rgb { r: 0, g: 100, b: 200 } };
+        let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
         let menu_text_fg = if is_dark { Color::Reset } else { Color::Black };
 
         loop {
@@ -772,9 +755,9 @@ impl Editor {
 
             // 1. Draw Help Title Bar
             queue!(stdout, cursor::MoveTo(0, 0),
-                SetBackgroundColor(Color::Rgb{r:25,g:25,b:25}), SetForegroundColor(Color::Cyan))?;
+                SetBackgroundColor(Color::Rgb{r:25,g:25,b:25}), SetForegroundColor( Color::Rgb{r:0,g:150,b:200} ))?;
 
-            let title = " rano Help Viewer ";
+            let title = " xnano Help Viewer ";
             let pad_len = (cols as usize).saturating_sub(title.len()) / 2;
             let pad1 = " ".repeat(pad_len);
             let pad2 = " ".repeat((cols as usize).saturating_sub(title.len() + pad_len));
@@ -798,10 +781,10 @@ impl Editor {
             // 3. Draw Bottom Menu
             let col_width = (cols as usize) / 6;
 
-            let menu1 = [("^X", " Exit Help")];
+            let menu1 = [("",""), ("^Y", " Prev Pg")];
             Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
-            let menu2 = [("^V", " Next Pg"), ("^Y", " Prev Pg")];
+            let menu2 = [("^X", " Exit Help"), ("^V", " Next Pg")];
             Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
 
             stdout.flush()?;
@@ -810,6 +793,7 @@ impl Editor {
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                    KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                     KeyCode::F(2) => break,
                     KeyCode::Esc => break,
                     KeyCode::Up | KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -844,6 +828,11 @@ impl Editor {
             let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             let is_alt = key.modifiers.contains(KeyModifiers::ALT);
 
+            // --- ADDED: Capture state before matching ---
+            let was_justified = self.is_justified;
+            // Assume we clear it unless the key is specifically ^U or ^J
+            let mut keep_justified = false;
+
             match key.code {
                 // Main Menus & Exiting
                 KeyCode::Char('g') if is_ctrl => self.show_help()?,
@@ -870,11 +859,57 @@ impl Editor {
                 KeyCode::Char('k') if is_ctrl => self.cut_line(),
                 KeyCode::F(9) => self.cut_line(),
 
-                KeyCode::Char('u') if is_ctrl => self.paste_line(),
-                KeyCode::F(10) => self.paste_line(),
+                // KeyCode::Char('u') if is_ctrl => self.paste_line(),
+                // KeyCode::F(10) => self.paste_line(),
+                // KeyCode::Char('u') if is_ctrl => {
+                //     if self.is_justified {
+                //         self.unjustify();
+                //     } else {
+                //         self.paste_line();
+                //     }
+                // }
 
-                KeyCode::Char('j') if is_ctrl => self.justify(),
-                KeyCode::F(4) => self.justify(),
+                // KeyCode::Char('j') if is_ctrl => self.justify(),
+                // KeyCode::F(4) => self.justify(),
+                // KeyCode::Char('j') if is_ctrl => {
+                //     self.justify();
+                //     self.is_justified = true;
+                // }
+
+                // KeyCode::Char('u') if is_ctrl  => {
+                //     if was_justified {
+                //         self.unjustify();
+                //     } else {
+                //         self.paste_line();
+                //     }
+                // }
+
+                KeyCode::Char('u') if is_ctrl => {
+                    if was_justified {
+                        self.unjustify();
+                    } else {
+                        self.paste_line();
+                    }
+                }
+                // Add the F10 arm separately or combine them:
+                KeyCode::F(10) => {
+                    if was_justified {
+                        self.unjustify();
+                    } else {
+                        self.paste_line();
+                    }
+                }
+
+                KeyCode::Char('j') if is_ctrl => {
+                    self.justify();
+                    self.is_justified = true;
+                    keep_justified = true; // This keeps the label active for the next frame
+                }
+                KeyCode::F(4) if is_ctrl => {
+                    self.justify();
+                    self.is_justified = true;
+                    keep_justified = true; // This keeps the label active for the next frame
+                }
 
                 KeyCode::Char('t') if is_ctrl => self.spell_check()?,
                 KeyCode::F(12) => self.spell_check()?,
@@ -945,6 +980,9 @@ impl Editor {
                     }
                 }
                 _ => { self.clear_status(); }
+            }
+            if !keep_justified {
+                self.is_justified = false;
             }
         }
 
@@ -1127,6 +1165,8 @@ impl Editor {
     }
 
     fn justify(&mut self) {
+        self.pre_justify_snapshot = Some(self.buffer.clone());
+
         let max_y = self.buffer.len_lines().saturating_sub(1);
         if max_y == 0 && self.buffer.len_chars() == 0 { return; }
 
@@ -1183,6 +1223,16 @@ impl Editor {
 
         self.set_status(String::from("Justified paragraph"));
         self.mark_modified();
+    }
+
+    fn unjustify(&mut self) {
+        if let Some(snapshot) = self.pre_justify_snapshot.take() {
+            self.buffer = snapshot;
+            self.is_justified = false;
+            self.clear_cache();
+            self.set_status(String::from("Unjustified"));
+            self.mark_modified();
+        }
     }
 
     fn cut_line(&mut self) {
@@ -1484,6 +1534,40 @@ impl Editor {
         Ok(())
     }
 
+    // fn save_file(&mut self) -> io::Result<()> {
+    //     let default_name = self.filename.clone().unwrap_or_default();
+    //     let prompt_text = if default_name.is_empty() {
+    //         String::from("File Name to Write: ")
+    //     } else {
+    //         format!("File Name to Write [{}]: ", default_name)
+    //     };
+    //
+    //     if let Some(mut new_name) = self.prompt(&prompt_text)? {
+    //         if new_name.is_empty() {
+    //             if !default_name.is_empty() {
+    //                 new_name = default_name;
+    //             } else {
+    //                 self.set_status(String::from("Save cancelled: No filename provided."));
+    //                 return Ok(());
+    //             }
+    //         }
+    //         let expanded_path = Self::expand_tilde(&new_name);
+    //         match File::create(&expanded_path) {
+    //             Ok(file) => {
+    //                 if let Err(e) = self.buffer.write_to(BufWriter::new(file)) {
+    //                     self.set_status(format!("Error writing file: {}", e));
+    //                 } else {
+    //                     self.filename = Some(new_name);
+    //                     self.set_status(format!("Wrote {} lines", self.buffer.len_lines()));
+    //                     self.is_modified = false;
+    //                 }
+    //             }
+    //             Err(e) => self.set_status(format!("Error creating file: {}", e)),
+    //         }
+    //     }
+    //     Ok(())
+    // }
+
     fn save_file(&mut self) -> io::Result<()> {
         let default_name = self.filename.clone().unwrap_or_default();
         let prompt_text = if default_name.is_empty() {
@@ -1501,7 +1585,23 @@ impl Editor {
                     return Ok(());
                 }
             }
+
             let expanded_path = Self::expand_tilde(&new_name);
+            let path = Path::new(&expanded_path);
+
+            // --- OVERWRITE CHECK ---
+            // If the file exists and it's NOT the file we are currently editing, warn the user.
+            if path.exists() && Some(&new_name) != self.filename.as_ref() {
+                let warning = format!("File \"{}\" exists, OVERWRITE ?", new_name);
+                match self.prompt_yn(&warning)? {
+                    Some(true) => { /* Proceed to save */ }
+                    _ => {
+                        self.set_status(String::from("Save cancelled"));
+                        return Ok(());
+                    }
+                }
+            }
+
             match File::create(&expanded_path) {
                 Ok(file) => {
                     if let Err(e) = self.buffer.write_to(BufWriter::new(file)) {
