@@ -19,6 +19,9 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
+use include_dir::{include_dir, Dir};
+static BUNDLED_THEMES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/themes");
+
 #[derive(PartialEq)]
 enum MenuState {
     Default,
@@ -48,7 +51,7 @@ struct Editor {
     highlight_cache: HashMap<usize, Vec<(Style, String)>>,
     current_theme: String,
     is_justified: bool,                // New: tracks if ^J was just pressed
-    pre_justify_snapshot: Option<Rope>, // New: stores buffer state for undo
+    pre_justify_snapshot: Option<(Rope, usize, usize)>, // Store (Rope, X, Y)
 }
 
 impl Editor {
@@ -65,6 +68,19 @@ impl Editor {
         }
     }
 
+    fn initialize_themes() -> io::Result<()> {
+        if let Some(theme_dir) = Self::get_theme_dir() {
+            // Only unpack if the directory is empty
+            if fs::read_dir(&theme_dir)?.next().is_none() {
+                for file in BUNDLED_THEMES.files() {
+                    let path = theme_dir.join(file.path());
+                    fs::write(path, file.contents())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn get_config_path() -> Option<PathBuf> {
         Self::get_base_dir().map(|p| p.join("xnanorc"))
     }
@@ -76,15 +92,6 @@ impl Editor {
             theme_path
         })
     }
-
-    // fn get_config_path() -> Option<PathBuf> {
-    //     let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
-    //     if home.is_empty() {
-    //         None
-    //     } else {
-    //         Some(Path::new(&home).join(".ranorc"))
-    //     }
-    // }
 
     fn load_theme() -> String {
         if let Some(path) = Self::get_config_path() {
@@ -137,37 +144,41 @@ impl Editor {
             Rope::new()
         };
 
-        // Load default themes
+        // 1. Initialize theme set and a counter
         let mut theme_set = ThemeSet::load_defaults();
-        let mut initial_status = String::new();
+        let mut themes_found = 0;
+        let mut error_occurred = None;
 
-        // Load custom themes from ~/.xnano/themes/
+        // 2. Load from Home Directory (~/.xnano/themes)
         if let Some(theme_dir) = Self::get_theme_dir() {
-            match ThemeSet::load_from_folder(theme_dir) {
-                Ok(custom_themes) => {
-                    let count = custom_themes.themes.len();
-                    theme_set.themes.extend(custom_themes.themes);
-                    if count > 0 {
-                        initial_status = format!("Loaded {} custom themes from ~/.xnano/themes", count);
-                    }
-                }
-                Err(_) => { /* Ignore empty or missing folder errors */ }
+            if let Ok(custom_themes) = ThemeSet::load_from_folder(&theme_dir) {
+                themes_found += custom_themes.themes.len();
+                theme_set.themes.extend(custom_themes.themes);
             }
         }
 
-        // Attempt to load custom themes from a "themes" directory
+        // 3. Load from Local Directory (./themes)
         match ThemeSet::load_from_folder("themes") {
             Ok(custom_themes) => {
-                let count = custom_themes.themes.len();
+                themes_found += custom_themes.themes.len();
                 theme_set.themes.extend(custom_themes.themes);
-                if count > 0 {
-                    // initial_status = format!("Loaded {} custom themes.", count);
-                }
             }
             Err(e) => {
-                initial_status = format!("Theme load error: {}", e);
+                // We only care about this error if we haven't found themes elsewhere
+                error_occurred = Some(format!("Local themes not found: {}", e));
             }
         }
+
+        // 4. Set the status message based on total results
+        let initial_status = if themes_found > 0 {
+            String::new()
+            // format!("Loaded {} custom themes.", themes_found)
+        } else if let Some(err) = error_occurred {
+            // Only show error if we found nothing in ~/.xnano/themes either
+            err
+        } else {
+            String::new()
+        };
 
         // Load the persisted theme name, but fallback if it doesn't exist in the loaded set
         let mut starting_theme = Self::load_theme();
@@ -276,7 +287,7 @@ impl Editor {
 
     fn scroll(&mut self) -> io::Result<()> {
         let (_, rows) = terminal::size()?;
-        let visible_rows = (rows.saturating_sub(4)) as usize;
+        let visible_rows = rows.saturating_sub(4) as usize;
 
         if self.cursor_y < self.row_offset {
             self.row_offset = self.cursor_y;
@@ -288,7 +299,7 @@ impl Editor {
     }
 
     fn draw_menu_line(
-        writer: &mut std::io::Stdout,
+        writer: &mut io::Stdout,
         row: u16,
         cols: u16,
         col_width: usize,
@@ -333,7 +344,7 @@ impl Editor {
         let mut stdout = stdout();
 
         let (cols, rows) = terminal::size()?;
-        let visible_rows = (rows.saturating_sub(4)) as usize;
+        let visible_rows = rows.saturating_sub(4) as usize;
 
         // Determine UI Colors based on the active theme
         let theme = &self.theme_set.themes[&self.current_theme];
@@ -540,16 +551,6 @@ impl Editor {
                     ("^V", " Next Pg"), ("^U", u_label), ("^T", " To Spell")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
-
-                // let menu1 = [
-                //     ("^G", " Get Help"), ("^O", " Write Out"), ("^R", " Read File"), ("^Y", " Prev Pg"), ("^K", " Cut Txt"), ("^C", " Cur Pos")
-                // ];
-                // Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
-                //
-                // let menu2 = [
-                //     ("^X", " Exit"), ("^J", " Justify"), ("^W", " Where Is"), ("^V", " Next Pg"), ("^U", " UnCut Txt"), ("^T", " To Spell")
-                // ];
-                // Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
             MenuState::YesNoCancel => {
                 let menu1 = [(" Y", " Yes")];
@@ -586,6 +587,11 @@ impl Editor {
     }
 
     fn line_len(&self, y: usize) -> usize {
+        // If we're asking for a line that doesn't exist, return 0 instead of panicking
+        if y >= self.buffer.len_lines() {
+            return 0;
+        }
+
         let line = self.buffer.line(y);
         let mut len = line.len_chars();
         if len > 0 && line.char(len - 1) == '\n' { len -= 1; }
@@ -594,7 +600,6 @@ impl Editor {
     }
 
     // --- Movement & Editing Helpers ---
-
     fn move_up(&mut self) {
         if self.cursor_y > 0 {
             self.cursor_y -= 1;
@@ -657,7 +662,7 @@ impl Editor {
 
     fn page_up(&mut self) -> io::Result<()> {
         let (_, rows) = terminal::size()?;
-        let visible_rows = (rows.saturating_sub(4)) as usize;
+        let visible_rows = rows.saturating_sub(4) as usize;
         self.cursor_y = self.cursor_y.saturating_sub(visible_rows);
         self.cursor_x = self.desired_cursor_x.min(self.line_len(self.cursor_y));
         Ok(())
@@ -665,7 +670,7 @@ impl Editor {
 
     fn page_down(&mut self) -> io::Result<()> {
         let (_, rows) = terminal::size()?;
-        let visible_rows = (rows.saturating_sub(4)) as usize;
+        let visible_rows = rows.saturating_sub(4) as usize;
         let max_y = self.buffer.len_lines().saturating_sub(1);
         self.cursor_y = (self.cursor_y + visible_rows).min(max_y);
         self.cursor_x = self.desired_cursor_x.min(self.line_len(self.cursor_y));
@@ -749,7 +754,7 @@ impl Editor {
         loop {
             let mut stdout = stdout();
             let (cols, rows) = terminal::size()?;
-            let visible_rows = (rows.saturating_sub(3)) as usize;
+            let visible_rows = rows.saturating_sub(3) as usize;
 
             queue!(stdout, SetBackgroundColor(theme_bg), terminal::Clear(ClearType::All))?;
 
@@ -859,31 +864,6 @@ impl Editor {
                 KeyCode::Char('k') if is_ctrl => self.cut_line(),
                 KeyCode::F(9) => self.cut_line(),
 
-                // KeyCode::Char('u') if is_ctrl => self.paste_line(),
-                // KeyCode::F(10) => self.paste_line(),
-                // KeyCode::Char('u') if is_ctrl => {
-                //     if self.is_justified {
-                //         self.unjustify();
-                //     } else {
-                //         self.paste_line();
-                //     }
-                // }
-
-                // KeyCode::Char('j') if is_ctrl => self.justify(),
-                // KeyCode::F(4) => self.justify(),
-                // KeyCode::Char('j') if is_ctrl => {
-                //     self.justify();
-                //     self.is_justified = true;
-                // }
-
-                // KeyCode::Char('u') if is_ctrl  => {
-                //     if was_justified {
-                //         self.unjustify();
-                //     } else {
-                //         self.paste_line();
-                //     }
-                // }
-
                 KeyCode::Char('u') if is_ctrl => {
                     if was_justified {
                         self.unjustify();
@@ -905,7 +885,7 @@ impl Editor {
                     self.is_justified = true;
                     keep_justified = true; // This keeps the label active for the next frame
                 }
-                KeyCode::F(4) if is_ctrl => {
+                KeyCode::F(4) => {
                     self.justify();
                     self.is_justified = true;
                     keep_justified = true; // This keeps the label active for the next frame
@@ -1165,7 +1145,9 @@ impl Editor {
     }
 
     fn justify(&mut self) {
-        self.pre_justify_snapshot = Some(self.buffer.clone());
+        // Save buffer AND cursor position
+        self.pre_justify_snapshot = Some((self.buffer.clone(), self.cursor_x, self.cursor_y));
+        // self.pre_justify_snapshot = Some(self.buffer.clone());
 
         let max_y = self.buffer.len_lines().saturating_sub(1);
         if max_y == 0 && self.buffer.len_chars() == 0 { return; }
@@ -1216,18 +1198,51 @@ impl Editor {
         self.buffer.remove(start_char..end_char);
         self.buffer.insert(start_char, &new_text);
 
-        let safe_pos = (start_char + new_text.chars().count()).min(self.buffer.len_chars());
-        self.cursor_y = self.buffer.char_to_line(safe_pos);
+        let total_chars = self.buffer.len_chars();
+        let safe_pos = (start_char + new_text.chars().count()).min(total_chars);
+        let raw_y = self.buffer.char_to_line(safe_pos);
+
+        self.cursor_y = raw_y.min(self.buffer.len_lines().saturating_sub(1));
         self.cursor_x = safe_pos - self.buffer.line_to_char(self.cursor_y);
         self.desired_cursor_x = self.cursor_x;
 
-        self.set_status(String::from("Justified paragraph"));
+        self.is_justified = true;
         self.mark_modified();
+        self.set_status(String::from("Justified paragraph"));
+
+        // // Calculate position, but ensure we don't land on a non-existent line
+        // let total_chars = self.buffer.len_chars();
+        // let safe_pos = (start_char + new_text.chars().count()).min(total_chars);
+        //
+        // // char_to_line can return an index equal to len_lines() if at the very end.
+        // // We must clamp it to (len_lines - 1).
+        // let raw_y = self.buffer.char_to_line(safe_pos);
+        // self.cursor_y = raw_y.min(self.buffer.len_lines().saturating_sub(1));
+        //
+        // self.cursor_x = safe_pos - self.buffer.line_to_char(self.cursor_y);
+        // self.desired_cursor_x = self.cursor_x;
+        //
+        // self.set_status(String::from("Justified paragraph"));
+        // self.is_justified = true;
+        // self.mark_modified();
     }
 
+    // fn unjustify(&mut self) {
+    //     if let Some(snapshot) = self.pre_justify_snapshot.take() {
+    //         self.buffer = snapshot;
+    //         self.is_justified = false;
+    //         self.clear_cache();
+    //         self.set_status(String::from("Unjustified"));
+    //         self.mark_modified();
+    //     }
+    // }
     fn unjustify(&mut self) {
-        if let Some(snapshot) = self.pre_justify_snapshot.take() {
+        if let Some((snapshot, x, y)) = self.pre_justify_snapshot.take() {
             self.buffer = snapshot;
+            self.cursor_x = x;
+            self.cursor_y = y;
+            self.desired_cursor_x = x;
+
             self.is_justified = false;
             self.clear_cache();
             self.set_status(String::from("Unjustified"));
@@ -1534,40 +1549,6 @@ impl Editor {
         Ok(())
     }
 
-    // fn save_file(&mut self) -> io::Result<()> {
-    //     let default_name = self.filename.clone().unwrap_or_default();
-    //     let prompt_text = if default_name.is_empty() {
-    //         String::from("File Name to Write: ")
-    //     } else {
-    //         format!("File Name to Write [{}]: ", default_name)
-    //     };
-    //
-    //     if let Some(mut new_name) = self.prompt(&prompt_text)? {
-    //         if new_name.is_empty() {
-    //             if !default_name.is_empty() {
-    //                 new_name = default_name;
-    //             } else {
-    //                 self.set_status(String::from("Save cancelled: No filename provided."));
-    //                 return Ok(());
-    //             }
-    //         }
-    //         let expanded_path = Self::expand_tilde(&new_name);
-    //         match File::create(&expanded_path) {
-    //             Ok(file) => {
-    //                 if let Err(e) = self.buffer.write_to(BufWriter::new(file)) {
-    //                     self.set_status(format!("Error writing file: {}", e));
-    //                 } else {
-    //                     self.filename = Some(new_name);
-    //                     self.set_status(format!("Wrote {} lines", self.buffer.len_lines()));
-    //                     self.is_modified = false;
-    //                 }
-    //             }
-    //             Err(e) => self.set_status(format!("Error creating file: {}", e)),
-    //         }
-    //     }
-    //     Ok(())
-    // }
-
     fn save_file(&mut self) -> io::Result<()> {
         let default_name = self.filename.clone().unwrap_or_default();
         let prompt_text = if default_name.is_empty() {
@@ -1590,7 +1571,7 @@ impl Editor {
             let path = Path::new(&expanded_path);
 
             // --- OVERWRITE CHECK ---
-            // If the file exists and it's NOT the file we are currently editing, warn the user.
+            // If the file exists it's NOT the file we are currently editing, warn the user.
             if path.exists() && Some(&new_name) != self.filename.as_ref() {
                 let warning = format!("File \"{}\" exists, OVERWRITE ?", new_name);
                 match self.prompt_yn(&warning)? {
@@ -1620,10 +1601,13 @@ impl Editor {
 }
 
 fn main() -> io::Result<()> {
+    let _ = Editor::initialize_themes(); // Ensure themes exist in ~/.xnano/themes
+
     let args: Vec<String> = env::args().collect();
     let filename = args.get(1).cloned();
 
     let mut editor = Editor::new(filename);
     editor.run()
 }
+
 
