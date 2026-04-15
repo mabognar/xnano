@@ -1,3 +1,6 @@
+// xnano - a text editor written in Rust inspired by nano
+// Written by: Matt Bognar, https://github.com/mabognar
+
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
@@ -13,13 +16,11 @@ use std::fs::File;
 use std::io::{self, stdout, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-
-// --- Syntect Imports ---
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
-
 use include_dir::{include_dir, Dir};
+
 static BUNDLED_THEMES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/themes");
 
 #[derive(PartialEq)]
@@ -371,7 +372,7 @@ impl Editor {
 
         queue!(stdout, cursor::MoveTo(0, 0),
             SetBackgroundColor(ui_bg), SetForegroundColor(title_fg))?;
-        let title = "xnano";
+        let title = "   xnano";
         let file_display = self.filename.as_deref().unwrap_or("New Buffer");
 
         let center_start = (cols as usize).saturating_sub(file_display.len()) / 2;
@@ -380,7 +381,7 @@ impl Editor {
         let left_and_center = format!("{}{}{}", title, pad1, file_display);
 
         if self.is_modified {
-            let right = " [ Modified ]";
+            let right = "[ Modified ]   ";
             let pad2_len = (cols as usize).saturating_sub(left_and_center.len() + right.len());
             let pad2 = " ".repeat(pad2_len);
 
@@ -598,7 +599,7 @@ impl Editor {
 
         let screen_y = self.cursor_y.saturating_sub(self.row_offset) + 1;
         let screen_x = self.get_visual_cursor_x().saturating_sub(self.col_offset);
-        let safe_screen_x = screen_x.min((cols.saturating_sub(1)) as usize);
+        let safe_screen_x = screen_x.min(cols.saturating_sub(1) as usize);
 
         queue!(stdout, cursor::MoveTo(safe_screen_x as u16, screen_y as u16))?;
         stdout.flush()?;
@@ -907,7 +908,20 @@ impl Editor {
 
     fn show_help(&mut self) -> io::Result<()> {
         let help_lines = [
-            "  Keybindings mimic those of nano.",
+            "  xnano is a text editor inspired by nano",
+            "  ---------------------------------------",
+            "  * Features: ",
+            "     -Written entirely in Rust",
+            "     -Fast",
+            "     -Themes",
+            "     -Syntax highlighting",
+            "     -Spell checker",
+            "  * Keybindings/behavior are largely identical to nano",
+            "  * Themes: ",
+            "     -To cycle through the included themes, type ^Z (Control Z)",
+            "     -Themes are persistent across sessions",
+            "     -Themes are stored in ~/.xnano/themes",
+            "     -To add a theme, just add a .tmTheme to this directory",
             "",
             "  Movement:",
             "    ^P, Up       Move up one line",
@@ -942,6 +956,9 @@ impl Editor {
             "    ^T, F12      To Spell (Spell check)",
             "    ^L, Alt-G    Go to line number",
             "    ^Z           Cycle Syntax Theme",
+            " ",
+            "  Written by: Matt Bognar, https://github.com/mabognar",
+            " ",
         ];
 
         let mut scroll_offset = 0;
@@ -966,7 +983,7 @@ impl Editor {
             queue!(stdout, SetBackgroundColor(theme_bg), terminal::Clear(ClearType::All))?;
 
             queue!(stdout, cursor::MoveTo(0, 0),
-                SetBackgroundColor(Color::Rgb{r:25,g:25,b:25}), SetForegroundColor( Color::Rgb{r:0,g:150,b:200} ))?;
+                SetBackgroundColor(ui_bg), SetForegroundColor( Color::Rgb{r:0,g:150,b:200} ))?;
 
             let title = " xnano Help Viewer ";
             let pad_len = (cols as usize).saturating_sub(title.len()) / 2;
