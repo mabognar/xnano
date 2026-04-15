@@ -583,7 +583,7 @@ impl Editor {
                         queue!(stdout, cursor::MoveTo(gutter_width as u16, (terminal_y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
                     }
                     if needs_right_dollar {
-                        queue!(stdout, cursor::MoveTo((cols - 1) as u16, (terminal_y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
+                        queue!(stdout, cursor::MoveTo(cols - 1, (terminal_y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
                     }
                 }
 
