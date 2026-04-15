@@ -28,6 +28,7 @@ enum MenuState {
     YesNoCancel,
     ReplaceAction,
     CancelOnly,
+    PromptWithBrowser,
 }
 
 struct Editor {
@@ -36,6 +37,7 @@ struct Editor {
     cursor_y: usize,
     desired_cursor_x: usize,
     row_offset: usize,
+    col_offset: usize,
     filename: Option<String>,
     should_quit: bool,
     status_message: String,
@@ -50,19 +52,17 @@ struct Editor {
     highlight_match: Option<(usize, usize, usize)>,
     highlight_cache: HashMap<usize, Vec<(Style, String)>>,
     current_theme: String,
-    is_justified: bool,                // New: tracks if ^J was just pressed
-    pre_justify_snapshot: Option<(Rope, usize, usize)>, // Store (Rope, X, Y)
+    is_justified: bool,
+    pre_justify_snapshot: Option<(Rope, usize, usize)>,
 }
 
 impl Editor {
-    // --- Theme Persistence Helpers ---
     fn get_base_dir() -> Option<PathBuf> {
         let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
         if home.is_empty() {
             None
         } else {
             let path = Path::new(&home).join(".xnano");
-            // Create the directory if it doesn't exist
             let _ = fs::create_dir_all(&path);
             Some(path)
         }
@@ -70,7 +70,6 @@ impl Editor {
 
     fn initialize_themes() -> io::Result<()> {
         if let Some(theme_dir) = Self::get_theme_dir() {
-            // Only unpack if the directory is empty
             if fs::read_dir(&theme_dir)?.next().is_none() {
                 for file in BUNDLED_THEMES.files() {
                     let path = theme_dir.join(file.path());
@@ -102,33 +101,26 @@ impl Editor {
                 }
             }
         }
-        String::from("base16-ocean.dark") // Default fallback
+        String::from("base16-ocean.dark")
     }
 
     fn save_theme(&self) {
         if let Some(path) = Self::get_config_path() {
-            let _ = fs::write(path, &self.current_theme); // Silently ignore errors saving config
+            let _ = fs::write(path, &self.current_theme);
         }
     }
 
-    // --- Helper to detect if the current theme is dark ---
     fn is_dark_theme(theme: &syntect::highlighting::Theme) -> bool {
         let bg = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
-        // Standard perceived luminance formula
         let luminance = 0.299 * (bg.r as f32) + 0.587 * (bg.g as f32) + 0.114 * (bg.b as f32);
-        luminance < 128.0 // If it's less than half-bright, it's dark
+        luminance < 128.0
     }
 
-    // --- NEW: Helper to derive a tinted UI background from the main theme background ---
     fn derive_ui_color(bg: syntect::highlighting::Color, is_dark: bool) -> Color {
-        // If the theme is dark, we lighten the UI chrome slightly to offset it from the background.
-        // If the theme is light, we darken it slightly to create a subtle shadow/border effect.
         let offset: i16 = if is_dark { 20 } else { -20 };
-
         let r = (bg.r as i16 + offset).clamp(0, 255) as u8;
         let g = (bg.g as i16 + offset).clamp(0, 255) as u8;
         let b = (bg.b as i16 + offset).clamp(0, 255) as u8;
-
         Color::Rgb { r, g, b }
     }
 
@@ -144,12 +136,10 @@ impl Editor {
             Rope::new()
         };
 
-        // 1. Initialize theme set and a counter
         let mut theme_set = ThemeSet::load_defaults();
         let mut themes_found = 0;
         let mut error_occurred = None;
 
-        // 2. Load from Home Directory (~/.xnano/themes)
         if let Some(theme_dir) = Self::get_theme_dir() {
             if let Ok(custom_themes) = ThemeSet::load_from_folder(&theme_dir) {
                 themes_found += custom_themes.themes.len();
@@ -157,30 +147,24 @@ impl Editor {
             }
         }
 
-        // 3. Load from Local Directory (./themes)
         match ThemeSet::load_from_folder("themes") {
             Ok(custom_themes) => {
                 themes_found += custom_themes.themes.len();
                 theme_set.themes.extend(custom_themes.themes);
             }
             Err(e) => {
-                // We only care about this error if we haven't found themes elsewhere
                 error_occurred = Some(format!("Local themes not found: {}", e));
             }
         }
 
-        // 4. Set the status message based on total results
         let initial_status = if themes_found > 0 {
             String::new()
-            // format!("Loaded {} custom themes.", themes_found)
         } else if let Some(err) = error_occurred {
-            // Only show error if we found nothing in ~/.xnano/themes either
             err
         } else {
             String::new()
         };
 
-        // Load the persisted theme name, but fallback if it doesn't exist in the loaded set
         let mut starting_theme = Self::load_theme();
         if !theme_set.themes.contains_key(&starting_theme) {
             starting_theme = String::from("base16-ocean.dark");
@@ -192,6 +176,7 @@ impl Editor {
             cursor_y: 0,
             desired_cursor_x: 0,
             row_offset: 0,
+            col_offset: 0,
             filename,
             should_quit: false,
             status_message: initial_status,
@@ -209,6 +194,20 @@ impl Editor {
             is_justified: false,
             pre_justify_snapshot: None,
         }
+    }
+
+    fn get_visual_cursor_x(&self) -> usize {
+        if self.cursor_y >= self.buffer.len_lines() { return 0; }
+        let line = self.buffer.line(self.cursor_y);
+        let mut visual_x = 0;
+        for ch in line.chars().take(self.cursor_x) {
+            if ch == '\t' {
+                visual_x += 4 - (visual_x % 4);
+            } else {
+                visual_x += 1;
+            }
+        }
+        visual_x
     }
 
     fn clear_cache(&mut self) {
@@ -286,8 +285,9 @@ impl Editor {
     }
 
     fn scroll(&mut self) -> io::Result<()> {
-        let (_, rows) = terminal::size()?;
+        let (cols, rows) = terminal::size()?;
         let visible_rows = rows.saturating_sub(4) as usize;
+        let cols_u = cols as usize;
 
         if self.cursor_y < self.row_offset {
             self.row_offset = self.cursor_y;
@@ -295,6 +295,16 @@ impl Editor {
         if self.cursor_y >= self.row_offset + visible_rows {
             self.row_offset = self.cursor_y - visible_rows + 1;
         }
+
+        let visual_x = self.get_visual_cursor_x();
+        let left_bound = if self.col_offset > 0 { self.col_offset + 1 } else { 0 };
+
+        if visual_x < left_bound {
+            self.col_offset = visual_x.saturating_sub(cols_u / 2);
+        } else if visual_x >= self.col_offset + cols_u.saturating_sub(1) {
+            self.col_offset = visual_x.saturating_sub(cols_u / 2);
+        }
+
         Ok(())
     }
 
@@ -346,19 +356,19 @@ impl Editor {
         let (cols, rows) = terminal::size()?;
         let visible_rows = rows.saturating_sub(4) as usize;
 
-        // Determine UI Colors based on the active theme
         let theme = &self.theme_set.themes[&self.current_theme];
         let is_dark = Self::is_dark_theme(theme);
 
         let raw_theme_bg = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
         let ui_bg = Self::derive_ui_color(raw_theme_bg, is_dark);
 
-        // let ui_bg = if is_dark { Color::Rgb { r: 25, g: 25, b: 25 } } else { Color::Rgb { r: 230, g: 230, b: 230 } };
         let title_fg = if is_dark { Color::Reset } else { Color::Rgb { r: 0, g: 50, b: 150 } };
         let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
         let menu_text_fg = if is_dark { Color::Reset } else { Color::Black };
 
-        // 1. Draw Title Bar
+        let dollar_bg = if is_dark { Color::Rgb { r: 180, g: 180, b: 180 } } else { Color::Rgb { r: 80, g: 80, b: 80 } };
+        let dollar_fg = if is_dark { Color::Black } else { Color::White };
+
         queue!(stdout, cursor::MoveTo(0, 0),
             SetBackgroundColor(ui_bg), SetForegroundColor(title_fg))?;
         let title = "xnano";
@@ -395,7 +405,6 @@ impl Editor {
             )?;
         }
 
-        // 2. Setup Syntect
         let syntax = if let Some(ref name) = self.filename {
             let path = Path::new(name);
             if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
@@ -410,7 +419,6 @@ impl Editor {
         let theme_bg_raw = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
         let default_cross_bg = Color::Rgb { r: theme_bg_raw.r, g: theme_bg_raw.g, b: theme_bg_raw.b };
 
-        // 3. Draw Text Area (Cached + Batched)
         for y in 0..visible_rows {
             queue!(stdout, cursor::MoveTo(0, (y + 1) as u16))?;
 
@@ -427,70 +435,67 @@ impl Editor {
 
                 let ranges = self.highlight_cache.get(&file_y).unwrap();
 
+                let mut visual_x = 0;
                 let mut printed_chars = 0;
                 let mut line_char_idx = 0;
+                let cols_u = cols as usize;
                 let line_has_search_highlight = self.highlight_match.map_or(false, |(h_y, _, _)| h_y == file_y);
+
+                let mut total_visual_width = 0;
+                for ch in self.buffer.line(file_y).chars() {
+                    if ch != '\n' && ch != '\r' {
+                        if ch == '\t' { total_visual_width += 4 - (total_visual_width % 4); }
+                        else { total_visual_width += 1; }
+                    }
+                }
+
+                let needs_left_dollar = self.col_offset > 0;
+                let needs_right_dollar = total_visual_width > self.col_offset + cols_u;
 
                 for (style, text) in ranges {
                     let syn_color = style.foreground;
                     let cross_color = Color::Rgb { r: syn_color.r, g: syn_color.g, b: syn_color.b };
-
                     let syn_bg = style.background;
                     let cross_bg = Color::Rgb { r: syn_bg.r, g: syn_bg.g, b: syn_bg.b };
 
-                    queue!(
-                        stdout,
-                        SetForegroundColor(cross_color),
-                        SetBackgroundColor(cross_bg)
-                    )?;
+                    queue!(stdout, SetForegroundColor(cross_color), SetBackgroundColor(cross_bg))?;
 
-                    if !line_has_search_highlight {
-                        // --- FAST PATH ---
-                        let mut chunk = String::with_capacity(text.len());
-                        for ch in text.chars() {
-                            if ch != '\n' && ch != '\r' && printed_chars < cols as usize {
-                                chunk.push(ch);
+                    for ch in text.chars() {
+                        if ch == '\n' || ch == '\r' {
+                            line_char_idx += 1;
+                            continue;
+                        }
+
+                        let is_highlighted = if line_has_search_highlight {
+                            if let Some((_, h_start, h_end)) = self.highlight_match {
+                                line_char_idx >= h_start && line_char_idx < h_end
+                            } else { false }
+                        } else { false };
+
+                        let display_chars = if ch == '\t' {
+                            let spaces = 4 - (visual_x % 4);
+                            vec![' '; spaces]
+                        } else {
+                            vec![ch]
+                        };
+
+                        for display_ch in display_chars {
+                            if visual_x >= self.col_offset && printed_chars < cols_u {
+
+                                if is_highlighted {
+                                    queue!(stdout, SetBackgroundColor(Color::Red), SetForegroundColor(Color::White))?;
+                                }
+
+                                queue!(stdout, Print(display_ch))?;
+
+                                if is_highlighted {
+                                    queue!(stdout, SetBackgroundColor(cross_bg), SetForegroundColor(cross_color))?;
+                                }
                                 printed_chars += 1;
                             }
-                            line_char_idx += 1;
+                            visual_x += 1;
                         }
-                        if !chunk.is_empty() {
-                            queue!(stdout, Print(chunk))?;
-                        }
-                    } else {
-                        // --- SLOW PATH ---
-                        for ch in text.chars() {
-                            if ch != '\n' && ch != '\r' {
-                                if printed_chars < cols as usize {
-                                    let mut is_highlighted = false;
-                                    if let Some((_, h_start, h_end)) = self.highlight_match {
-                                        if line_char_idx >= h_start && line_char_idx < h_end {
-                                            is_highlighted = true;
-                                        }
-                                    }
-
-                                    if is_highlighted {
-                                        queue!(
-                                            stdout,
-                                            SetBackgroundColor(Color::Red),
-                                            SetForegroundColor(Color::White)
-                                        )?;
-                                    }
-
-                                    queue!(stdout, Print(ch))?;
-
-                                    if is_highlighted {
-                                        queue!(
-                                            stdout,
-                                            SetBackgroundColor(cross_bg),
-                                            SetForegroundColor(cross_color)
-                                        )?;
-                                    }
-                                    printed_chars += 1;
-                                }
-                            }
-                            line_char_idx += 1;
-                        }
+                        line_char_idx += 1;
                     }
                 }
 
@@ -500,6 +505,17 @@ impl Editor {
                     SetBackgroundColor(default_cross_bg),
                     terminal::Clear(ClearType::UntilNewLine)
                 )?;
+
+                if needs_left_dollar {
+                    queue!(stdout, cursor::MoveTo(0, (y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
+                }
+                if needs_right_dollar {
+                    queue!(stdout, cursor::MoveTo((cols_u - 1) as u16, (y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
+                }
+
+                // --- CHANGED: Reset to document background, not terminal default ---
+                queue!(stdout, SetBackgroundColor(default_cross_bg), SetForegroundColor(Color::Reset))?;
+
             } else {
                 queue!(
                     stdout,
@@ -509,7 +525,6 @@ impl Editor {
             }
         }
 
-        // 4. Draw Status Bar
         queue!(stdout, cursor::MoveTo(0, rows - 3))?;
 
         if !self.status_message.is_empty() {
@@ -529,10 +544,10 @@ impl Editor {
                 SetForegroundColor(Color::Reset)
             )?;
         } else {
-            queue!(stdout, terminal::Clear(ClearType::CurrentLine))?;
+            // --- CHANGED: Explicitly clear status bar with theme background ---
+            queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::CurrentLine))?;
         }
 
-        // 5. Draw Bottom Menu
         let col_width = (cols as usize) / 6;
 
         match self.menu_state {
@@ -543,7 +558,6 @@ impl Editor {
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
-                // Determine the label for ^U
                 let u_label = if self.is_justified { " Unjustify" } else { " UnCut Txt" };
 
                 let menu2 = [
@@ -573,11 +587,20 @@ impl Editor {
                 let menu2 = [("^C", " Cancel")];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
+            MenuState::PromptWithBrowser => {
+                let menu1 = [("^T", " To Files")];
+                Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
+
+                let menu2 = [("^C", " Cancel")];
+                Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
+            }
         }
 
-        // 6. Return cursor
         let screen_y = self.cursor_y.saturating_sub(self.row_offset) + 1;
-        queue!(stdout, cursor::MoveTo(self.cursor_x as u16, screen_y as u16))?;
+        let screen_x = self.get_visual_cursor_x().saturating_sub(self.col_offset);
+        let safe_screen_x = screen_x.min((cols.saturating_sub(1)) as usize);
+
+        queue!(stdout, cursor::MoveTo(safe_screen_x as u16, screen_y as u16))?;
         stdout.flush()?;
         Ok(())
     }
@@ -587,7 +610,6 @@ impl Editor {
     }
 
     fn line_len(&self, y: usize) -> usize {
-        // If we're asking for a line that doesn't exist, return 0 instead of panicking
         if y >= self.buffer.len_lines() {
             return 0;
         }
@@ -697,6 +719,192 @@ impl Editor {
         Ok(())
     }
 
+    fn run_file_browser(&mut self) -> io::Result<Option<String>> {
+        let mut current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if let Ok(canon) = current_dir.canonicalize() {
+            current_dir = canon;
+        }
+        let mut selected = 0;
+        let mut scroll = 0;
+
+        loop {
+            let mut entries: Vec<(String, bool)> = Vec::new();
+            if current_dir.parent().is_some() {
+                entries.push((String::from(".."), true));
+            }
+
+            if let Ok(read_dir) = fs::read_dir(&current_dir) {
+                let mut dirs = Vec::new();
+                let mut dot_dirs = Vec::new();
+                let mut files = Vec::new();
+                let mut dot_files = Vec::new();
+
+                for entry in read_dir.flatten() {
+                    let path = entry.path();
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    let is_dir = path.is_dir();
+                    let is_dot = name.starts_with('.');
+
+                    if is_dir {
+                        if is_dot { dot_dirs.push((name, true)); }
+                        else { dirs.push((name, true)); }
+                    } else {
+                        if is_dot { dot_files.push((name, false)); }
+                        else { files.push((name, false)); }
+                    }
+                }
+
+                dirs.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+                dot_dirs.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+                files.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+                dot_files.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+
+                entries.extend(dirs);
+                entries.extend(files);
+                entries.extend(dot_dirs);
+                entries.extend(dot_files);
+            }
+
+            if entries.is_empty() {
+                entries.push((String::from("."), true));
+            }
+            if selected >= entries.len() {
+                selected = entries.len().saturating_sub(1);
+            }
+
+            loop {
+                let mut stdout = stdout();
+                let (cols, rows) = terminal::size()?;
+                let visible_rows = rows.saturating_sub(4) as usize;
+
+                if selected < scroll { scroll = selected; }
+                if selected >= scroll + visible_rows { scroll = selected - visible_rows + 1; }
+
+                let theme = &self.theme_set.themes[&self.current_theme];
+                let is_dark = Self::is_dark_theme(theme);
+                let theme_bg_raw = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
+                let default_cross_bg = Color::Rgb { r: theme_bg_raw.r, g: theme_bg_raw.g, b: theme_bg_raw.b };
+                let default_cross_fg = if is_dark { Color::White } else { Color::Black };
+
+                let ui_bg = Self::derive_ui_color(theme_bg_raw, is_dark);
+                let title_fg = if is_dark { Color::Reset } else { Color::Rgb { r: 0, g: 50, b: 150 } };
+
+                queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::All))?;
+
+                queue!(stdout, cursor::MoveTo(0, 0), SetBackgroundColor(ui_bg), SetForegroundColor(title_fg))?;
+                let title = " xnano File Browser ";
+                let path_str = current_dir.to_string_lossy();
+                let center_start = (cols as usize).saturating_sub(path_str.len()) / 2;
+                let pad1_len = center_start.saturating_sub(title.len());
+                let pad1 = " ".repeat(pad1_len);
+                let top_line = format!("{}{}{}", title, pad1, path_str);
+                let pad2_len = (cols as usize).saturating_sub(top_line.len());
+                let pad2 = " ".repeat(pad2_len);
+                queue!(stdout, Print(format!("{}{}", top_line, pad2)))?;
+
+                for i in 0..visible_rows {
+                    queue!(stdout, cursor::MoveTo(0, (i + 1) as u16))?;
+                    let idx = scroll + i;
+
+                    if idx < entries.len() {
+                        let (name, is_dir) = &entries[idx];
+                        let is_selected = idx == selected;
+
+                        let display_name = if *is_dir { format!("(dir)  {}", name) } else { format!("       {}", name) };
+                        let mut truncated = display_name;
+                        if truncated.len() > cols as usize {
+                            truncated.truncate(cols as usize);
+                        }
+                        let padding = " ".repeat((cols as usize).saturating_sub(truncated.len()));
+
+                        if is_selected {
+                            queue!(stdout, SetBackgroundColor( Color::Rgb { r: 0, g: 150, b: 200} ), SetForegroundColor(Color::White))?;
+                        } else {
+                            queue!(stdout, SetBackgroundColor(default_cross_bg), SetForegroundColor(default_cross_fg))?;
+                        }
+
+                        queue!(stdout, Print(format!("{}{}", truncated, padding)))?;
+                    } else {
+                        queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::UntilNewLine))?;
+                    }
+                }
+
+                let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
+                let menu_text_fg = if is_dark { Color::Reset } else { Color::Black };
+                let col_width = (cols as usize) / 6;
+
+                let menu1 = [("", ""), ("^Y", " Prev Pg")];
+                Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
+
+                let menu2 = [("^C", " Cancel"), ("^V", " Next Pg"), ("Enter", " Select")];
+                Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
+
+                stdout.flush()?;
+
+                if let Event::Key(key) = event::read()? {
+                    match key.code {
+                        KeyCode::Esc => return Ok(None),
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(None),
+
+                        KeyCode::Up => {
+                            selected = selected.saturating_sub(1);
+                        }
+                        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            selected = selected.saturating_sub(1);
+                        }
+                        KeyCode::Down => {
+                            if selected + 1 < entries.len() {
+                                selected += 1;
+                            }
+                        }
+                        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if selected + 1 < entries.len() {
+                                selected += 1;
+                            }
+                        }
+                        KeyCode::PageUp | KeyCode::F(7) => {
+                            selected = selected.saturating_sub(visible_rows);
+                        }
+                        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            selected = selected.saturating_sub(visible_rows);
+                        }
+                        KeyCode::PageDown | KeyCode::F(8) => {
+                            let max_offset = entries.len().saturating_sub(1);
+                            selected = (selected + visible_rows).min(max_offset);
+                        }
+                        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            let max_offset = entries.len().saturating_sub(1);
+                            selected = (selected + visible_rows).min(max_offset);
+                        }
+
+                        KeyCode::Enter => {
+                            let (name, is_dir) = &entries[selected];
+                            if *is_dir {
+                                if name == ".." {
+                                    if let Some(parent) = current_dir.parent() {
+                                        current_dir = parent.to_path_buf();
+                                    }
+                                } else {
+                                    current_dir = current_dir.join(name);
+                                    if let Ok(canon) = current_dir.canonicalize() {
+                                        current_dir = canon;
+                                    }
+                                }
+                                selected = 0;
+                                scroll = 0;
+                                break;
+                            } else {
+                                let target = current_dir.join(name);
+                                return Ok(Some(target.to_string_lossy().into_owned()));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
     fn show_help(&mut self) -> io::Result<()> {
         let help_lines = [
             "  Keybindings mimic those of nano.",
@@ -727,7 +935,7 @@ impl Editor {
             "    ^O, F3       Write Out (Save)",
             "    ^R, F5       Read File (Insert)",
             "    ^G, F1       Get Help (this screen)",
-            "    ^X, F2       Exit rano",
+            "    ^X, F2       Exit xnano",
             "",
             "  Tools:",
             "    ^C, F11      Current Position",
@@ -746,7 +954,6 @@ impl Editor {
         let theme_fg = Color::Rgb { r: fg.r, g: fg.g, b: fg.b };
 
         let is_dark = Self::is_dark_theme(theme);
-        // let ui_bg = if is_dark { Color::Rgb { r: 25, g: 25, b: 25 } } else { Color::Rgb { r: 230, g: 230, b: 230 } };
         let ui_bg = Self::derive_ui_color(bg, is_dark);
         let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
         let menu_text_fg = if is_dark { Color::Reset } else { Color::Black };
@@ -758,7 +965,6 @@ impl Editor {
 
             queue!(stdout, SetBackgroundColor(theme_bg), terminal::Clear(ClearType::All))?;
 
-            // 1. Draw Help Title Bar
             queue!(stdout, cursor::MoveTo(0, 0),
                 SetBackgroundColor(Color::Rgb{r:25,g:25,b:25}), SetForegroundColor( Color::Rgb{r:0,g:150,b:200} ))?;
 
@@ -770,7 +976,6 @@ impl Editor {
             queue!(stdout, Print(format!("{}{}{}", pad1, title, pad2)),
                 SetBackgroundColor(theme_bg), SetForegroundColor(theme_fg))?;
 
-            // 2. Draw Help Text
             for i in 0..visible_rows {
                 queue!(stdout, cursor::MoveTo(0, (i + 1) as u16))?;
                 let line_idx = scroll_offset + i;
@@ -783,7 +988,6 @@ impl Editor {
                 queue!(stdout, terminal::Clear(ClearType::UntilNewLine))?;
             }
 
-            // 3. Draw Bottom Menu
             let col_width = (cols as usize) / 6;
 
             let menu1 = [("",""), ("^Y", " Prev Pg")];
@@ -794,25 +998,40 @@ impl Editor {
 
             stdout.flush()?;
 
-            // 4. Handle Input (Block until valid key is pressed)
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                     KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                     KeyCode::F(2) => break,
                     KeyCode::Esc => break,
-                    KeyCode::Up | KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+
+                    KeyCode::Up => {
                         scroll_offset = scroll_offset.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        scroll_offset = scroll_offset.saturating_sub(1);
+                    }
+                    KeyCode::Down => {
                         if scroll_offset + visible_rows < help_lines.len() {
                             scroll_offset += 1;
                         }
                     }
-                    KeyCode::F(7) | KeyCode::PageUp | KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if scroll_offset + visible_rows < help_lines.len() {
+                            scroll_offset += 1;
+                        }
+                    }
+                    KeyCode::PageUp | KeyCode::F(7) => {
                         scroll_offset = scroll_offset.saturating_sub(visible_rows);
                     }
-                    KeyCode::F(8) | KeyCode::PageDown | KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        scroll_offset = scroll_offset.saturating_sub(visible_rows);
+                    }
+                    KeyCode::PageDown | KeyCode::F(8) => {
+                        let max_offset = help_lines.len().saturating_sub(visible_rows);
+                        scroll_offset = (scroll_offset + visible_rows).min(max_offset);
+                    }
+                    KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         let max_offset = help_lines.len().saturating_sub(visible_rows);
                         scroll_offset = (scroll_offset + visible_rows).min(max_offset);
                     }
@@ -833,13 +1052,10 @@ impl Editor {
             let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             let is_alt = key.modifiers.contains(KeyModifiers::ALT);
 
-            // --- ADDED: Capture state before matching ---
             let was_justified = self.is_justified;
-            // Assume we clear it unless the key is specifically ^U or ^J
             let mut keep_justified = false;
 
             match key.code {
-                // Main Menus & Exiting
                 KeyCode::Char('g') if is_ctrl => self.show_help()?,
                 KeyCode::F(1) => self.show_help()?,
 
@@ -852,7 +1068,6 @@ impl Editor {
                 KeyCode::Char('r') if is_ctrl => self.read_file()?,
                 KeyCode::F(5) => self.read_file()?,
 
-                // Search & Replace
                 KeyCode::Char('w') if is_ctrl => self.where_is()?,
                 KeyCode::F(6) => self.where_is()?,
 
@@ -860,58 +1075,44 @@ impl Editor {
                 KeyCode::Char('r') if is_alt => self.replace()?,
                 KeyCode::Char('4') if is_ctrl => self.replace()?,
 
-                // Editing Commands
                 KeyCode::Char('k') if is_ctrl => self.cut_line(),
                 KeyCode::F(9) => self.cut_line(),
 
                 KeyCode::Char('u') if is_ctrl => {
-                    if was_justified {
-                        self.unjustify();
-                    } else {
-                        self.paste_line();
-                    }
+                    if was_justified { self.unjustify(); } else { self.paste_line(); }
                 }
-                // Add the F10 arm separately or combine them:
                 KeyCode::F(10) => {
-                    if was_justified {
-                        self.unjustify();
-                    } else {
-                        self.paste_line();
-                    }
+                    if was_justified { self.unjustify(); } else { self.paste_line(); }
                 }
 
                 KeyCode::Char('j') if is_ctrl => {
                     self.justify();
                     self.is_justified = true;
-                    keep_justified = true; // This keeps the label active for the next frame
+                    keep_justified = true;
                 }
                 KeyCode::F(4) => {
                     self.justify();
                     self.is_justified = true;
-                    keep_justified = true; // This keeps the label active for the next frame
+                    keep_justified = true;
                 }
 
                 KeyCode::Char('t') if is_ctrl => self.spell_check()?,
                 KeyCode::F(12) => self.spell_check()?,
 
-                // Navigation / Info
                 KeyCode::Char('c') if is_ctrl => self.cur_pos(),
                 KeyCode::F(11) => self.cur_pos(),
 
                 KeyCode::Char('l') if is_ctrl => self.go_to_line()?,
                 KeyCode::Char('g') if is_alt => self.go_to_line()?,
 
-                // Theme Cycler
                 KeyCode::Char('z') if is_ctrl => self.cycle_theme(),
 
-                // Paging
                 KeyCode::Char('y') if is_ctrl => self.page_up()?,
                 KeyCode::F(7) | KeyCode::PageUp => self.page_up()?,
 
                 KeyCode::Char('v') if is_ctrl => self.page_down()?,
                 KeyCode::F(8) | KeyCode::PageDown => self.page_down()?,
 
-                // Control Movement bindings
                 KeyCode::Char('b') if is_ctrl => self.move_left(),
                 KeyCode::Char('f') if is_ctrl => self.move_right(),
                 KeyCode::Char('p') if is_ctrl => self.move_up(),
@@ -919,21 +1120,17 @@ impl Editor {
                 KeyCode::Char('a') if is_ctrl => self.move_to_start_of_line(),
                 KeyCode::Char('e') if is_ctrl => self.move_to_end_of_line(),
 
-                // Delete Under Cursor
                 KeyCode::Char('d') if is_ctrl => self.delete_char(),
                 KeyCode::Delete => self.delete_char(),
 
-                // Tab (^I or Tab Key)
                 KeyCode::Char('i') if is_ctrl => self.insert_tab(),
                 KeyCode::Tab => self.insert_tab(),
 
-                // Standard Arrow Movement
                 KeyCode::Up => self.move_up(),
                 KeyCode::Down => self.move_down(),
                 KeyCode::Left => self.move_left(),
                 KeyCode::Right => self.move_right(),
 
-                // Typing
                 KeyCode::Char(c) if !is_ctrl && !is_alt => {
                     let idx = self.get_cursor_char_idx();
                     self.buffer.insert_char(idx, c);
@@ -977,7 +1174,7 @@ impl Editor {
             String::from("Search: ")
         };
 
-        if let Some(mut query) = self.prompt(&prompt_text)? {
+        if let Some(mut query) = self.prompt(&prompt_text, false)? {
             if query.is_empty() {
                 if let Some(ref last) = self.last_search {
                     query = last.clone();
@@ -1031,7 +1228,7 @@ impl Editor {
             String::from("Search (to replace): ")
         };
 
-        if let Some(mut query) = self.prompt(&prompt_text)? {
+        if let Some(mut query) = self.prompt(&prompt_text, false)? {
             if query.is_empty() {
                 if let Some(ref last) = self.last_search {
                     query = last.clone();
@@ -1043,7 +1240,7 @@ impl Editor {
                 self.last_search = Some(query.clone());
             }
 
-            if let Some(replacement) = self.prompt("Replace with: ")? {
+            if let Some(replacement) = self.prompt("Replace with: ", false)? {
                 let mut current_idx = self.get_cursor_char_idx();
                 let mut changes_made = 0;
                 let mut replace_all = false;
@@ -1131,7 +1328,7 @@ impl Editor {
     }
 
     fn go_to_line(&mut self) -> io::Result<()> {
-        if let Some(input) = self.prompt("Enter line number: ")? {
+        if let Some(input) = self.prompt("Enter line number: ", false)? {
             if let Ok(line) = input.trim().parse::<usize>() {
                 self.cursor_y = line.saturating_sub(1).min(self.buffer.len_lines().saturating_sub(1));
                 self.cursor_x = 0;
@@ -1145,9 +1342,7 @@ impl Editor {
     }
 
     fn justify(&mut self) {
-        // Save buffer AND cursor position
         self.pre_justify_snapshot = Some((self.buffer.clone(), self.cursor_x, self.cursor_y));
-        // self.pre_justify_snapshot = Some(self.buffer.clone());
 
         let max_y = self.buffer.len_lines().saturating_sub(1);
         if max_y == 0 && self.buffer.len_chars() == 0 { return; }
@@ -1209,33 +1404,8 @@ impl Editor {
         self.is_justified = true;
         self.mark_modified();
         self.set_status(String::from("Justified paragraph"));
-
-        // // Calculate position, but ensure we don't land on a non-existent line
-        // let total_chars = self.buffer.len_chars();
-        // let safe_pos = (start_char + new_text.chars().count()).min(total_chars);
-        //
-        // // char_to_line can return an index equal to len_lines() if at the very end.
-        // // We must clamp it to (len_lines - 1).
-        // let raw_y = self.buffer.char_to_line(safe_pos);
-        // self.cursor_y = raw_y.min(self.buffer.len_lines().saturating_sub(1));
-        //
-        // self.cursor_x = safe_pos - self.buffer.line_to_char(self.cursor_y);
-        // self.desired_cursor_x = self.cursor_x;
-        //
-        // self.set_status(String::from("Justified paragraph"));
-        // self.is_justified = true;
-        // self.mark_modified();
     }
 
-    // fn unjustify(&mut self) {
-    //     if let Some(snapshot) = self.pre_justify_snapshot.take() {
-    //         self.buffer = snapshot;
-    //         self.is_justified = false;
-    //         self.clear_cache();
-    //         self.set_status(String::from("Unjustified"));
-    //         self.mark_modified();
-    //     }
-    // }
     fn unjustify(&mut self) {
         if let Some((snapshot, x, y)) = self.pre_justify_snapshot.take() {
             self.buffer = snapshot;
@@ -1285,8 +1455,8 @@ impl Editor {
         self.mark_modified();
     }
 
-    fn prompt(&mut self, prompt_text: &str) -> io::Result<Option<String>> {
-        self.menu_state = MenuState::CancelOnly;
+    fn prompt(&mut self, prompt_text: &str, allow_browser: bool) -> io::Result<Option<String>> {
+        self.menu_state = if allow_browser { MenuState::PromptWithBrowser } else { MenuState::CancelOnly };
         self.status_time = None;
         let mut input = String::new();
 
@@ -1317,6 +1487,14 @@ impl Editor {
                         self.set_status(String::from("Cancelled."));
                         self.menu_state = MenuState::Default;
                         return Ok(None);
+                    }
+                    KeyCode::Char('t') if allow_browser && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if let Some(selected_path) = self.run_file_browser()? {
+                            self.clear_status();
+                            self.menu_state = MenuState::Default;
+                            return Ok(Some(selected_path));
+                        }
+                        self.menu_state = MenuState::PromptWithBrowser;
                     }
                     KeyCode::Backspace => {
                         input.pop();
@@ -1497,7 +1675,7 @@ impl Editor {
                 self.scroll()?;
 
                 let prompt_text = format!("Misspelled: '{}'. Replace with (Enter to skip): ", word);
-                if let Some(replacement) = self.prompt(&prompt_text)? {
+                if let Some(replacement) = self.prompt(&prompt_text, false)? {
                     if !replacement.is_empty() {
                         self.buffer.remove(start_idx..end_idx);
                         self.buffer.insert(start_idx, &replacement);
@@ -1530,7 +1708,7 @@ impl Editor {
     }
 
     fn read_file(&mut self) -> io::Result<()> {
-        if let Some(filepath) = self.prompt("File to insert: ")? {
+        if let Some(filepath) = self.prompt("File to insert: ", true)? {
             if filepath.is_empty() {
                 self.set_status(String::from("Read cancelled."));
                 return Ok(());
@@ -1557,7 +1735,7 @@ impl Editor {
             format!("File Name to Write [{}]: ", default_name)
         };
 
-        if let Some(mut new_name) = self.prompt(&prompt_text)? {
+        if let Some(mut new_name) = self.prompt(&prompt_text, true)? {
             if new_name.is_empty() {
                 if !default_name.is_empty() {
                     new_name = default_name;
@@ -1570,12 +1748,10 @@ impl Editor {
             let expanded_path = Self::expand_tilde(&new_name);
             let path = Path::new(&expanded_path);
 
-            // --- OVERWRITE CHECK ---
-            // If the file exists it's NOT the file we are currently editing, warn the user.
             if path.exists() && Some(&new_name) != self.filename.as_ref() {
                 let warning = format!("File \"{}\" exists, OVERWRITE ?", new_name);
                 match self.prompt_yn(&warning)? {
-                    Some(true) => { /* Proceed to save */ }
+                    Some(true) => {}
                     _ => {
                         self.set_status(String::from("Save cancelled"));
                         return Ok(());
@@ -1601,7 +1777,7 @@ impl Editor {
 }
 
 fn main() -> io::Result<()> {
-    let _ = Editor::initialize_themes(); // Ensure themes exist in ~/.xnano/themes
+    let _ = Editor::initialize_themes();
 
     let args: Vec<String> = env::args().collect();
     let filename = args.get(1).cloned();
@@ -1609,5 +1785,4 @@ fn main() -> io::Result<()> {
     let mut editor = Editor::new(filename);
     editor.run()
 }
-
 
