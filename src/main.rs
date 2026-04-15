@@ -1,5 +1,6 @@
 // xnano - a text editor written in Rust inspired by nano
 // Written by: Matt Bognar, https://github.com/mabognar
+// Extended to include Soft-Wrap and Line Numbers
 
 use crossterm::{
     cursor,
@@ -55,6 +56,10 @@ struct Editor {
     current_theme: String,
     is_justified: bool,
     pre_justify_snapshot: Option<(Rope, usize, usize)>,
+
+    // New persistent settings
+    show_line_numbers: bool,
+    soft_wrap: bool,
 }
 
 impl Editor {
@@ -93,21 +98,41 @@ impl Editor {
         })
     }
 
-    fn load_theme() -> String {
+    fn load_config() -> (String, bool, bool) {
+        let mut theme = String::from("base16-ocean.dark");
+        let mut line_numbers = false;
+        let mut soft_wrap = false;
+
         if let Some(path) = Self::get_config_path() {
             if let Ok(contents) = fs::read_to_string(path) {
-                let theme = contents.trim().to_string();
-                if !theme.is_empty() {
-                    return theme;
+                for line in contents.lines() {
+                    let parts: Vec<&str> = line.splitn(2, '=').collect();
+                    if parts.len() == 2 {
+                        match parts[0].trim() {
+                            "theme" => theme = parts[1].trim().to_string(),
+                            "line_numbers" => line_numbers = parts[1].trim() == "true",
+                            "soft_wrap" => soft_wrap = parts[1].trim() == "true",
+                            _ => {}
+                        }
+                    } else if parts.len() == 1 && !line.trim().is_empty() {
+                        // Backwards compatibility with plain theme string
+                        if !line.contains('=') {
+                            theme = line.trim().to_string();
+                        }
+                    }
                 }
             }
         }
-        String::from("base16-ocean.dark")
+        (theme, line_numbers, soft_wrap)
     }
 
-    fn save_theme(&self) {
+    fn save_config(&self) {
         if let Some(path) = Self::get_config_path() {
-            let _ = fs::write(path, &self.current_theme);
+            let content = format!(
+                "theme={}\nline_numbers={}\nsoft_wrap={}\n",
+                self.current_theme, self.show_line_numbers, self.soft_wrap
+            );
+            let _ = fs::write(path, content);
         }
     }
 
@@ -166,7 +191,7 @@ impl Editor {
             String::new()
         };
 
-        let mut starting_theme = Self::load_theme();
+        let (mut starting_theme, line_numbers, soft_wrap) = Self::load_config();
         if !theme_set.themes.contains_key(&starting_theme) {
             starting_theme = String::from("base16-ocean.dark");
         }
@@ -194,7 +219,20 @@ impl Editor {
             current_theme: starting_theme,
             is_justified: false,
             pre_justify_snapshot: None,
+            show_line_numbers: line_numbers,
+            soft_wrap,
         }
+    }
+
+    fn get_visual_line_width(&self, y: usize) -> usize {
+        if y >= self.buffer.len_lines() { return 0; }
+        let mut w = 0;
+        for ch in self.buffer.line(y).chars() {
+            if ch == '\n' || ch == '\r' { continue; }
+            if ch == '\t' { w += 4 - (w % 4); }
+            else { w += 1; }
+        }
+        w
     }
 
     fn get_visual_cursor_x(&self) -> usize {
@@ -228,7 +266,7 @@ impl Editor {
             let next_idx = (current_idx + 1) % themes.len();
             self.current_theme = themes[next_idx].clone();
 
-            self.save_theme();
+            self.save_config();
             self.clear_cache();
 
             self.set_status(format!("Theme changed to: {}", self.current_theme));
@@ -290,20 +328,47 @@ impl Editor {
         let visible_rows = rows.saturating_sub(4) as usize;
         let cols_u = cols as usize;
 
-        if self.cursor_y < self.row_offset {
-            self.row_offset = self.cursor_y;
-        }
-        if self.cursor_y >= self.row_offset + visible_rows {
-            self.row_offset = self.cursor_y - visible_rows + 1;
-        }
+        let max_line_num_len = self.buffer.len_lines().to_string().len();
+        let gutter_width = if self.show_line_numbers { max_line_num_len + 1 } else { 0 };
+        let available_width = std::cmp::max(1, cols_u.saturating_sub(gutter_width));
 
-        let visual_x = self.get_visual_cursor_x();
-        let left_bound = if self.col_offset > 0 { self.col_offset + 1 } else { 0 };
+        if self.soft_wrap {
+            self.col_offset = 0;
+            if self.cursor_y < self.row_offset {
+                self.row_offset = self.cursor_y;
+            }
 
-        if visual_x < left_bound {
-            self.col_offset = visual_x.saturating_sub(cols_u / 2);
-        } else if visual_x >= self.col_offset + cols_u.saturating_sub(1) {
-            self.col_offset = visual_x.saturating_sub(cols_u / 2);
+            loop {
+                let mut screen_y_offset = 0;
+                for i in self.row_offset..self.cursor_y {
+                    let w = self.get_visual_line_width(i);
+                    screen_y_offset += if w == 0 { 1 } else { (w - 1) / available_width + 1 };
+                }
+                let cursor_visual = self.get_visual_cursor_x();
+                screen_y_offset += cursor_visual / available_width;
+
+                if screen_y_offset >= visible_rows && self.row_offset < self.cursor_y {
+                    self.row_offset += 1;
+                } else {
+                    break;
+                }
+            }
+        } else {
+            if self.cursor_y < self.row_offset {
+                self.row_offset = self.cursor_y;
+            }
+            if self.cursor_y >= self.row_offset + visible_rows {
+                self.row_offset = self.cursor_y - visible_rows + 1;
+            }
+
+            let visual_x = self.get_visual_cursor_x();
+            let left_bound = if self.col_offset > 0 { self.col_offset + 1 } else { 0 };
+
+            if visual_x < left_bound {
+                self.col_offset = visual_x.saturating_sub(available_width / 2);
+            } else if visual_x >= self.col_offset + available_width.saturating_sub(1) {
+                self.col_offset = visual_x.saturating_sub(available_width / 2);
+            }
         }
 
         Ok(())
@@ -420,12 +485,15 @@ impl Editor {
         let theme_bg_raw = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
         let default_cross_bg = Color::Rgb { r: theme_bg_raw.r, g: theme_bg_raw.g, b: theme_bg_raw.b };
 
-        for y in 0..visible_rows {
-            queue!(stdout, cursor::MoveTo(0, (y + 1) as u16))?;
+        let max_line_num_len = self.buffer.len_lines().to_string().len();
+        let gutter_width = if self.show_line_numbers { max_line_num_len + 1 } else { 0 };
+        let available_width = std::cmp::max(1, (cols as usize).saturating_sub(gutter_width));
 
-            let file_y = self.row_offset + y;
+        let mut terminal_y = 0;
+        let mut file_y = self.row_offset;
+
+        while terminal_y < visible_rows {
             if file_y < self.buffer.len_lines() {
-
                 if !self.highlight_cache.contains_key(&file_y) {
                     let mut highlighter = HighlightLines::new(syntax, theme);
                     let line_str = self.buffer.line(file_y).to_string();
@@ -437,23 +505,18 @@ impl Editor {
                 let ranges = self.highlight_cache.get(&file_y).unwrap();
 
                 let mut visual_x = 0;
-                let mut printed_chars = 0;
                 let mut line_char_idx = 0;
-                let cols_u = cols as usize;
                 let line_has_search_highlight = self.highlight_match.map_or(false, |(h_y, _, _)| h_y == file_y);
 
-                let mut total_visual_width = 0;
-                for ch in self.buffer.line(file_y).chars() {
-                    if ch != '\n' && ch != '\r' {
-                        if ch == '\t' { total_visual_width += 4 - (total_visual_width % 4); }
-                        else { total_visual_width += 1; }
-                    }
+                queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
+                if self.show_line_numbers {
+                    let num_str = format!("{:>width$} ", file_y + 1, width = max_line_num_len);
+                    queue!(stdout, SetBackgroundColor(default_cross_bg), SetForegroundColor(menu_key_fg), Print(num_str))?;
                 }
 
-                let needs_left_dollar = self.col_offset > 0;
-                let needs_right_dollar = total_visual_width > self.col_offset + cols_u;
+                let mut printed_on_current_line = 0;
 
-                for (style, text) in ranges {
+                'char_loop: for (style, text) in ranges {
                     let syn_color = style.foreground;
                     let cross_color = Color::Rgb { r: syn_color.r, g: syn_color.g, b: syn_color.b };
                     let syn_bg = style.background;
@@ -473,57 +536,69 @@ impl Editor {
                             } else { false }
                         } else { false };
 
-                        let display_chars = if ch == '\t' {
-                            let spaces = 4 - (visual_x % 4);
-                            vec![' '; spaces]
-                        } else {
-                            vec![ch]
-                        };
+                        let display_chars = if ch == '\t' { vec![' '; 4 - (visual_x % 4)] } else { vec![ch] };
 
                         for display_ch in display_chars {
-                            if visual_x >= self.col_offset && printed_chars < cols_u {
+                            if self.soft_wrap {
+                                if printed_on_current_line >= available_width {
+                                    queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::UntilNewLine))?;
+                                    terminal_y += 1;
+                                    if terminal_y >= visible_rows { break 'char_loop; }
 
-                                if is_highlighted {
-                                    queue!(stdout, SetBackgroundColor(Color::Red), SetForegroundColor(Color::White))?;
+                                    queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
+                                    if self.show_line_numbers {
+                                        queue!(stdout, SetBackgroundColor(default_cross_bg), Print(" ".repeat(gutter_width)))?;
+                                    }
+                                    queue!(stdout, SetForegroundColor(cross_color), SetBackgroundColor(cross_bg))?;
+                                    printed_on_current_line = 0;
                                 }
 
+                                if is_highlighted { queue!(stdout, SetBackgroundColor(Color::Red), SetForegroundColor(Color::White))?; }
                                 queue!(stdout, Print(display_ch))?;
+                                if is_highlighted { queue!(stdout, SetBackgroundColor(cross_bg), SetForegroundColor(cross_color))?; }
 
-                                if is_highlighted {
-                                    queue!(stdout, SetBackgroundColor(cross_bg), SetForegroundColor(cross_color))?;
+                                printed_on_current_line += 1;
+                                visual_x += 1;
+                            } else {
+                                if visual_x >= self.col_offset && printed_on_current_line < available_width {
+                                    if is_highlighted { queue!(stdout, SetBackgroundColor(Color::Red), SetForegroundColor(Color::White))?; }
+                                    queue!(stdout, Print(display_ch))?;
+                                    if is_highlighted { queue!(stdout, SetBackgroundColor(cross_bg), SetForegroundColor(cross_color))?; }
+                                    printed_on_current_line += 1;
                                 }
-                                printed_chars += 1;
+                                visual_x += 1;
                             }
-                            visual_x += 1;
                         }
                         line_char_idx += 1;
                     }
                 }
 
-                queue!(
-                    stdout,
-                    SetForegroundColor(Color::Reset),
-                    SetBackgroundColor(default_cross_bg),
-                    terminal::Clear(ClearType::UntilNewLine)
-                )?;
+                queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::UntilNewLine))?;
 
-                if needs_left_dollar {
-                    queue!(stdout, cursor::MoveTo(0, (y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
-                }
-                if needs_right_dollar {
-                    queue!(stdout, cursor::MoveTo((cols_u - 1) as u16, (y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
+                if !self.soft_wrap {
+                    let needs_left_dollar = self.col_offset > 0;
+                    let needs_right_dollar = visual_x > self.col_offset + available_width;
+
+                    if needs_left_dollar {
+                        queue!(stdout, cursor::MoveTo(gutter_width as u16, (terminal_y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
+                    }
+                    if needs_right_dollar {
+                        queue!(stdout, cursor::MoveTo((cols - 1) as u16, (terminal_y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
+                    }
                 }
 
-                // --- CHANGED: Reset to document background, not terminal default ---
                 queue!(stdout, SetBackgroundColor(default_cross_bg), SetForegroundColor(Color::Reset))?;
 
             } else {
-                queue!(
-                    stdout,
-                    SetBackgroundColor(default_cross_bg),
-                    terminal::Clear(ClearType::UntilNewLine)
-                )?;
+                queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
+                if self.show_line_numbers {
+                    queue!(stdout, SetBackgroundColor(default_cross_bg), Print(" ".repeat(gutter_width)))?;
+                }
+                queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::UntilNewLine))?;
             }
+
+            terminal_y += 1;
+            file_y += 1;
         }
 
         queue!(stdout, cursor::MoveTo(0, rows - 3))?;
@@ -545,7 +620,6 @@ impl Editor {
                 SetForegroundColor(Color::Reset)
             )?;
         } else {
-            // --- CHANGED: Explicitly clear status bar with theme background ---
             queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::CurrentLine))?;
         }
 
@@ -597,11 +671,28 @@ impl Editor {
             }
         }
 
-        let screen_y = self.cursor_y.saturating_sub(self.row_offset) + 1;
-        let screen_x = self.get_visual_cursor_x().saturating_sub(self.col_offset);
-        let safe_screen_x = screen_x.min(cols.saturating_sub(1) as usize);
+        let mut cursor_screen_y = 0;
+        let mut cursor_screen_x = 0;
 
-        queue!(stdout, cursor::MoveTo(safe_screen_x as u16, screen_y as u16))?;
+        if self.soft_wrap {
+            let mut temp_screen_y = 0;
+            for i in self.row_offset..self.cursor_y {
+                let w = self.get_visual_line_width(i);
+                temp_screen_y += if w == 0 { 1 } else { (w - 1) / available_width + 1 };
+            }
+            let cursor_visual = self.get_visual_cursor_x();
+            temp_screen_y += cursor_visual / available_width;
+            cursor_screen_x = gutter_width + (cursor_visual % available_width);
+            cursor_screen_y = temp_screen_y;
+        } else {
+            cursor_screen_y = self.cursor_y.saturating_sub(self.row_offset);
+            cursor_screen_x = gutter_width + self.get_visual_cursor_x().saturating_sub(self.col_offset);
+        }
+
+        let safe_screen_y = cursor_screen_y.min(visible_rows.saturating_sub(1)) + 1;
+        let safe_screen_x = cursor_screen_x.min((cols as usize).saturating_sub(1));
+
+        queue!(stdout, cursor::MoveTo(safe_screen_x as u16, safe_screen_y as u16))?;
         stdout.flush()?;
         Ok(())
     }
@@ -622,7 +713,6 @@ impl Editor {
         len
     }
 
-    // --- Movement & Editing Helpers ---
     fn move_up(&mut self) {
         if self.cursor_y > 0 {
             self.cursor_y -= 1;
@@ -916,12 +1006,15 @@ impl Editor {
             "     -Themes",
             "     -Syntax highlighting",
             "     -Spell checker",
-            "  * Keybindings/behavior are largely identical to nano",
-            "  * Themes: ",
-            "     -To cycle through the included themes, type ^Z (Control Z)",
-            "     -Themes are persistent across sessions",
+            "     -Soft line-wrap & line numbers",
+            "  * Themes & Configuration: ",
+            "     -To cycle through the included themes, type Meta+Z (ALT+Z, Option+Z)",
+            "     -On MacOS, make sure you have 'Use Option as Meta' selected ",
+            "      in your terminal settings",
+            "     -Line numbers and Soft wrap are stored across sessions",
+            "     -Settings are stored in ~/.xnano/xnanorc",
             "     -Themes are stored in ~/.xnano/themes",
-            "     -To add a theme, just add a .tmTheme to this directory",
+            "     -Additional .tmTheme themes can be added to ~/.xnano/themes",
             "",
             "  Movement:",
             "    ^P, Up       Move up one line",
@@ -943,7 +1036,7 @@ impl Editor {
             "",
             "  Search & Replace:",
             "    ^W, F6       Where is (Search)",
-            "    ^\\, Alt-R    Search and Replace",
+            "    ^\\           Search and Replace",
             "",
             "  File & System:",
             "    ^O, F3       Write Out (Save)",
@@ -954,8 +1047,10 @@ impl Editor {
             "  Tools:",
             "    ^C, F11      Current Position",
             "    ^T, F12      To Spell (Spell check)",
-            "    ^L, Alt-G    Go to line number",
-            "    ^Z           Cycle Syntax Theme",
+            "    ^L           Go to line number",
+            "    Meta+T       Cycle Syntax Theme",
+            "    Meta+L       Toggle Line Numbers",
+            "    Meta+S       Toggle Soft Wrap",
             " ",
             "  Written by: Matt Bognar, https://github.com/mabognar",
             " ",
@@ -1067,7 +1162,7 @@ impl Editor {
             self.highlight_match = None;
 
             let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-            let is_alt = key.modifiers.contains(KeyModifiers::ALT);
+            let is_alt = key.modifiers.contains(KeyModifiers::ALT); // Leaving ALT match to support raw fallbacks just in case, but mappings below use CTRL.
 
             let was_justified = self.is_justified;
             let mut keep_justified = false;
@@ -1089,7 +1184,6 @@ impl Editor {
                 KeyCode::F(6) => self.where_is()?,
 
                 KeyCode::Char('\\') if is_ctrl => self.replace()?,
-                KeyCode::Char('r') if is_alt => self.replace()?,
                 KeyCode::Char('4') if is_ctrl => self.replace()?,
 
                 KeyCode::Char('k') if is_ctrl => self.cut_line(),
@@ -1120,9 +1214,20 @@ impl Editor {
                 KeyCode::F(11) => self.cur_pos(),
 
                 KeyCode::Char('l') if is_ctrl => self.go_to_line()?,
-                KeyCode::Char('g') if is_alt => self.go_to_line()?,
 
-                KeyCode::Char('z') if is_ctrl => self.cycle_theme(),
+                KeyCode::Char('t') if is_alt => self.cycle_theme(),
+
+                KeyCode::Char('l') if is_alt => {
+                    self.show_line_numbers = !self.show_line_numbers;
+                    self.save_config();
+                    self.set_status(if self.show_line_numbers { "Line numbers enabled".into() } else { "Line numbers disabled".into() });
+                }
+
+                KeyCode::Char('s') if is_alt => {
+                    self.soft_wrap = !self.soft_wrap;
+                    self.save_config();
+                    self.set_status(if self.soft_wrap { "Soft wrap enabled".into() } else { "Soft wrap disabled".into() });
+                }
 
                 KeyCode::Char('y') if is_ctrl => self.page_up()?,
                 KeyCode::F(7) | KeyCode::PageUp => self.page_up()?,
