@@ -752,7 +752,7 @@ impl Editor {
 
         self.is_justified = true;
         self.mark_modified();
-        self.set_status(String::from("Justified --- to undo, Ctrl+U"));
+        self.set_status(String::from("Justified --- Ctrl+U to undo"));
     }
 
     pub(crate) fn unjustify(&mut self) {
