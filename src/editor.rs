@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use std::path::Path;
 use std::fs::{self, File};
 use std::env;
-use std::io::{self, stdout, BufWriter, Write};
+use std::io::{self, stdout, BufWriter};
 use ropey::Rope;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;

@@ -1,8 +1,9 @@
 use crate::editor::{Editor, MenuState};
 use crate::ui::UiExt;
+use crate::config::ConfigExt; // Added so we can find the ~/.xnano/ directory
 use std::collections::HashSet;
-use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::fs::{File, OpenOptions}; // Added OpenOptions for appending to files
+use std::io::{self, BufRead, BufReader, Write}; // Added Write for writeln!
 
 pub trait SpellExt {
     fn load_dictionary() -> HashSet<String>;
@@ -14,8 +15,9 @@ pub trait SpellExt {
 impl SpellExt for Editor {
     fn load_dictionary() -> HashSet<String> {
         let mut dict = HashSet::new();
-        let dict_paths = ["/usr/share/dict/words", "/usr/dict/words"];
 
+        // 1. Load standard system dictionary
+        let dict_paths = ["/usr/share/dict/words", "/usr/dict/words"];
         for path in dict_paths {
             if let Ok(file) = File::open(path) {
                 let reader = BufReader::new(file);
@@ -25,6 +27,18 @@ impl SpellExt for Editor {
                 break;
             }
         }
+
+        // 2. Load custom persistent dictionary (if it exists)
+        if let Some(mut custom_path) = Self::get_base_dir() {
+            custom_path.push("custom_dict.txt");
+            if let Ok(file) = File::open(&custom_path) {
+                let reader = BufReader::new(file);
+                for line in reader.lines().map_while(Result::ok) {
+                    dict.insert(line.trim().to_lowercase());
+                }
+            }
+        }
+
         dict
     }
 
@@ -103,7 +117,18 @@ impl SpellExt for Editor {
                     self.ignored_words.insert(lower_word);
                     current_idx = end;
                 } else if choice_clean == "a" {
-                    self.dictionary.as_mut().unwrap().insert(lower_word);
+                    // Add to the active session dictionary
+                    self.dictionary.as_mut().unwrap().insert(lower_word.clone());
+
+                    // Add to the persistent file
+                    if let Some(mut custom_path) = Self::get_base_dir() {
+                        custom_path.push("custom_dict.txt");
+                        // OpenOptions allows us to append to the file, or create it if it doesn't exist
+                        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(custom_path) {
+                            let _ = writeln!(file, "{}", lower_word);
+                        }
+                    }
+
                     current_idx = end;
                 } else if let Ok(num) = choice_clean.parse::<usize>() {
                     if num > 0 && num <= current_suggs_copy.len() {
