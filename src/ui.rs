@@ -142,6 +142,11 @@ impl UiExt for Editor {
         let gutter_width = if self.show_line_numbers { max_line_num_len + 1 } else { 0 };
         let available_width = std::cmp::max(1, (cols as usize).saturating_sub(gutter_width));
 
+        let cursor_absolute = self.get_cursor_char_idx();
+        let mark_range = self.mark.map(|m| {
+            if m < cursor_absolute { (m, cursor_absolute) } else { (cursor_absolute, m) }
+        });
+
         let mut terminal_y = 0;
         let mut file_y = self.row_offset;
 
@@ -183,11 +188,25 @@ impl UiExt for Editor {
                             continue;
                         }
 
+                        // ---> ADD THIS LINE to calculate absolute index <---
+                        let absolute_char_idx = self.buffer.line_to_char(file_y) + line_char_idx;
+
+                        // ---> REPLACE the existing `is_highlighted` calculation <---
                         let is_highlighted = if line_has_search_highlight {
                             if let Some((_, h_start, h_end)) = self.highlight_match {
                                 line_char_idx >= h_start && line_char_idx < h_end
                             } else { false }
-                        } else { false };
+                        } else if let Some((m_start, m_end)) = mark_range {
+                            absolute_char_idx >= m_start && absolute_char_idx < m_end
+                        } else {
+                            false
+                        };
+
+                        // let is_highlighted = if line_has_search_highlight {
+                        //     if let Some((_, h_start, h_end)) = self.highlight_match {
+                        //         line_char_idx >= h_start && line_char_idx < h_end
+                        //     } else { false }
+                        // } else { false };
 
                         let display_chars = if ch == '\t' { vec![' '; 4 - (visual_x % 4)] } else { vec![ch] };
 
@@ -752,40 +771,42 @@ impl UiExt for Editor {
             "     -Additional .tmTheme themes can be added to ~/.xnano/themes",
             "",
             "  Movement:",
-            "    ^P, Up       Move up one line",
-            "    ^N, Down     Move down one line",
-            "    ^B, Left     Move left one character",
-            "    ^F, Right    Move right one character",
-            "    ^A           Move to start of line",
-            "    ^E           Move to end of line",
-            "    ^Y, F7, PgUp Move up one page",
-            "    ^V, F8, PgDn Move down one page",
+            "    Ctrl+P, Up       Move up one line",
+            "    Ctrl+N, Down     Move down one line",
+            "    Ctrl+B, Left     Move left one character",
+            "    Ctrl+F, Right    Move right one character",
+            "    Ctrl+A           Move to start of line",
+            "    Ctrl+E           Move to end of line",
+            "    Ctrl+Y, F7, PgUp Move up one page",
+            "    Ctrl+V, F8, PgDn Move down one page",
             "",
             "  Editing:",
-            "    ^K, F9       Cut current line into clipboard",
-            "    ^U, F10      Paste contents of clipboard",
-            "    ^D, Del      Delete character under cursor",
-            "    Backspace    Delete character before cursor",
-            "    ^J, F4       Justify current paragraph",
-            "    ^I, Tab      Insert tab",
+            "    Ctrl+K, F9       Cut current line into clipboard",
+            "    Ctrl+U, F10      Paste contents of clipboard",
+            "    Ctrl+D, Del      Delete character under cursor",
+            "    Backspace        Delete character before cursor",
+            "    Ctrl+J, F4       Justify current paragraph",
+            "    Ctrl+I, Tab      Insert tab",
+            "    Ctrl+^, Meta+A   Mark beginning of selected text.",
+            "                     This also unselects text.",
             "",
             "  Search & Replace:",
-            "    ^W, F6       Where is (Search)",
-            "    ^\\           Search and Replace",
+            "    Ctrl+W, F6       Where is (Search)",
+            "    Ctrl+\\          Search and Replace",
             "",
             "  File & System:",
-            "    ^O, F3       Write Out (Save)",
-            "    ^R, F5       Read File (Insert)",
-            "    ^G, F1       Get Help (this screen)",
-            "    ^X, F2       Exit xnano",
+            "    Ctrl+O, F3       Write Out (Save)",
+            "    Ctrl+R, F5       Read File (Insert)",
+            "    Ctrl+G, F1       Get Help (this screen)",
+            "    Ctrl+X, F2       Exit xnano",
             "",
             "  Tools:",
-            "    ^C, F11      Current Position",
-            "    ^T, F12      To Spell (Spell check)",
-            "    ^L           Go to line number",
-            "    Meta+T       Cycle Syntax Theme",
-            "    Meta+L       Toggle Line Numbers",
-            "    Meta+S       Toggle Soft Wrap",
+            "    Ctrl+C, F11      Current Position",
+            "    Ctrl+T, F12      To Spell (Spell check)",
+            "    Ctrl+L           Go to line number",
+            "    Meta+T           Cycle Syntax Theme",
+            "    Meta+L           Toggle Line Numbers",
+            "    Meta+S           Toggle Soft Wrap",
             " ",
             "  Written by: Matt Bognar, https://github.com/mabognar",
             " ",

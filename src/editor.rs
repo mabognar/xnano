@@ -29,6 +29,7 @@ pub struct Editor {
     pub(crate) cursor_x: usize,
     pub(crate) cursor_y: usize,
     pub(crate) desired_cursor_x: usize,
+    pub(crate) mark: Option<usize>,
     pub(crate) row_offset: usize,
     pub(crate) col_offset: usize,
     pub(crate) filename: Option<String>,
@@ -105,6 +106,7 @@ impl Editor {
             cursor_x: 0,
             cursor_y: 0,
             desired_cursor_x: 0,
+            mark: None,
             row_offset: 0,
             col_offset: 0,
             filename,
@@ -368,6 +370,16 @@ impl Editor {
         Ok(())
     }
 
+    pub(crate) fn toggle_mark(&mut self) {
+        if self.mark.is_some() {
+            self.mark = None;
+            self.set_status(String::from("Unmark set"));
+        } else {
+            self.mark = Some(self.get_cursor_char_idx());
+            self.set_status(String::from("Mark Set"));
+        }
+    }
+
     pub(crate) fn process_keypress(&mut self) -> io::Result<()> {
         if let Event::Key(key) = event::read()? {
             self.highlight_match = None;
@@ -379,6 +391,10 @@ impl Editor {
             let mut keep_justified = false;
 
             match key.code {
+                KeyCode::Char('^') if is_ctrl => self.toggle_mark(),
+                KeyCode::Char('6') if is_ctrl => self.toggle_mark(),
+                KeyCode::Char('a') if is_alt => self.toggle_mark(),
+
                 KeyCode::Char('g') if is_ctrl => self.show_help()?,
                 KeyCode::F(1) => self.show_help()?,
 
@@ -736,7 +752,7 @@ impl Editor {
 
         self.is_justified = true;
         self.mark_modified();
-        self.set_status(String::from("Justified paragraph"));
+        self.set_status(String::from("Justified --- to undo, Ctrl+U"));
     }
 
     pub(crate) fn unjustify(&mut self) {
@@ -755,36 +771,60 @@ impl Editor {
 
     pub(crate) fn cut_line(&mut self) {
         if self.buffer.len_chars() == 0 { return; }
-        let start_char = self.buffer.line_to_char(self.cursor_y);
-        let end_char = if self.cursor_y + 1 < self.buffer.len_lines() {
-            self.buffer.line_to_char(self.cursor_y + 1)
+
+        // If a mark is active, cut the selected region
+        if let Some(mark_idx) = self.mark {
+            let cursor_idx = self.get_cursor_char_idx();
+            let start_char = mark_idx.min(cursor_idx);
+            let end_char = mark_idx.max(cursor_idx);
+
+            if start_char != end_char {
+                self.clipboard = self.buffer.slice(start_char..end_char).to_string();
+                self.buffer.remove(start_char..end_char);
+
+                self.cursor_y = self.buffer.char_to_line(start_char);
+                self.cursor_x = start_char - self.buffer.line_to_char(self.cursor_y);
+                self.desired_cursor_x = self.cursor_x;
+
+                self.mark = None; // Unmark after cutting
+                self.set_status(String::from("Cut selection"));
+                self.mark_modified();
+            }
         } else {
-            self.buffer.len_chars()
-        };
+            // No mark, do standard full-line cut
+            let start_char = self.buffer.line_to_char(self.cursor_y);
+            let end_char = if self.cursor_y + 1 < self.buffer.len_lines() {
+                self.buffer.line_to_char(self.cursor_y + 1)
+            } else {
+                self.buffer.len_chars()
+            };
 
-        self.clipboard = self.buffer.slice(start_char..end_char).to_string();
-        self.buffer.remove(start_char..end_char);
+            self.clipboard = self.buffer.slice(start_char..end_char).to_string();
+            self.buffer.remove(start_char..end_char);
 
-        self.cursor_x = 0;
-        self.desired_cursor_x = 0;
-        let max_y = self.buffer.len_lines().saturating_sub(1);
-        if self.cursor_y > max_y {
-            self.cursor_y = max_y;
+            self.cursor_x = 0;
+            self.desired_cursor_x = 0;
+            let max_y = self.buffer.len_lines().saturating_sub(1);
+            if self.cursor_y > max_y {
+                self.cursor_y = max_y;
+            }
+            self.set_status(String::from("Cut line"));
+            self.mark_modified();
         }
-        self.set_status(String::from("Cut line"));
-        self.mark_modified();
     }
 
     pub(crate) fn paste_line(&mut self) {
         if self.clipboard.is_empty() { return; }
-        let start_char = self.buffer.line_to_char(self.cursor_y);
-        self.buffer.insert(start_char, &self.clipboard);
 
-        let newlines_pasted = self.clipboard.chars().filter(|&c| c == '\n').count();
-        self.cursor_y += newlines_pasted;
-        self.cursor_x = 0;
-        self.desired_cursor_x = 0;
-        self.set_status(String::from("Pasted line"));
+        let current_char = self.get_cursor_char_idx();
+        self.buffer.insert(current_char, &self.clipboard);
+
+        let new_idx = current_char + self.clipboard.chars().count();
+        self.cursor_y = self.buffer.char_to_line(new_idx);
+        self.cursor_x = new_idx - self.buffer.line_to_char(self.cursor_y);
+        self.desired_cursor_x = self.cursor_x;
+
+        self.set_status(String::from("Pasted text"));
         self.mark_modified();
     }
 
