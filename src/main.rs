@@ -31,6 +31,7 @@ enum MenuState {
     ReplaceAction,
     CancelOnly,
     PromptWithBrowser,
+    SpellCheck,
 }
 
 struct Editor {
@@ -45,6 +46,8 @@ struct Editor {
     status_message: String,
     clipboard: String,
     dictionary: Option<HashSet<String>>,
+    ignored_words: HashSet<String>,
+    current_suggestions: Vec<String>,
     syntax_set: SyntaxSet,
     theme_set: ThemeSet,
     is_modified: bool,
@@ -56,8 +59,6 @@ struct Editor {
     current_theme: String,
     is_justified: bool,
     pre_justify_snapshot: Option<(Rope, usize, usize)>,
-
-    // New persistent settings
     show_line_numbers: bool,
     soft_wrap: bool,
 }
@@ -209,6 +210,8 @@ impl Editor {
             status_time: Some(Instant::now()),
             clipboard: String::new(),
             dictionary: None,
+            ignored_words: HashSet::new(),
+            current_suggestions: Vec::new(),
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set,
             is_modified: false,
@@ -610,12 +613,38 @@ impl Editor {
                 SetForegroundColor(title_fg)
             )?;
 
-            let status_text = format!("{}", self.status_message);
-            let status_fill = " ".repeat((cols as usize).saturating_sub(status_text.len()));
+            let mut printed_len = 0;
 
+            // 1. Draw the blue suggestions first if we are spell checking
+            if self.menu_state == MenuState::SpellCheck {
+                if !self.current_suggestions.is_empty() {
+                    for (i, sug) in self.current_suggestions.iter().enumerate() {
+                        let num_str = format!("{}", i + 1);
+                        queue!(
+                            stdout,
+                            SetForegroundColor(menu_key_fg), // Blue
+                            Print(&num_str),
+                            SetForegroundColor(title_fg),    // Normal
+                            Print(format!(" {}   ", sug))    // Spacing!
+                        )?;
+                        printed_len += num_str.len() + 1 + sug.len() + 3;
+                    }
+                } else {
+                    queue!(stdout, Print("No suggestions   "))?;
+                    printed_len += "No suggestions   ".len();
+                }
+            }
+
+            // 2. Draw the actual status message (e.g., "Replace with: hello")
+            let status_text = format!("{}", self.status_message);
+            queue!(stdout, Print(&status_text))?;
+            printed_len += status_text.len();
+
+            // 3. Fill the rest of the line with background color
+            let status_fill = " ".repeat((cols as usize).saturating_sub(printed_len));
             queue!(
                 stdout,
-                Print(format!("{}{}", status_text, status_fill)),
+                Print(status_fill),
                 SetBackgroundColor(Color::Reset),
                 SetForegroundColor(Color::Reset)
             )?;
@@ -669,10 +698,19 @@ impl Editor {
                 let menu2 = [("^C", " Cancel")];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
+            MenuState::SpellCheck => {
+                // First row (rows - 2): Put "i" and "a" in the command column so they get the blue highlight
+                let menu1 = [("i", "gnore"), ("a", "dd to dict")];
+                Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
+
+                // Second row (rows - 1): Keep the cancel option visible just like nano
+                let menu2 = [("^C", " Cancel")];
+                Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
+            }
         }
 
-        let mut cursor_screen_y = 0;
-        let mut cursor_screen_x = 0;
+        let cursor_screen_y;
+        let cursor_screen_x;
 
         if self.soft_wrap {
             let mut temp_screen_y = 0;
@@ -1002,7 +1040,7 @@ impl Editor {
             "  ---------------------------------------",
             "  * Features: ",
             "     -Written entirely in Rust",
-            "     -Fast",
+            "     -Very fast",
             "     -Themes",
             "     -Syntax highlighting",
             "     -Spell checker",
@@ -1011,7 +1049,7 @@ impl Editor {
             "     -To cycle through the included themes, type Meta+Z (ALT+Z, Option+Z)",
             "     -On MacOS, make sure you have 'Use Option as Meta' selected ",
             "      in your terminal settings",
-            "     -Line numbers and Soft wrap are stored across sessions",
+            "     -Line numbers and soft wrap are stored across sessions",
             "     -Settings are stored in ~/.xnano/xnanorc",
             "     -Themes are stored in ~/.xnano/themes",
             "     -Additional .tmTheme themes can be added to ~/.xnano/themes",
@@ -1578,7 +1616,11 @@ impl Editor {
     }
 
     fn prompt(&mut self, prompt_text: &str, allow_browser: bool) -> io::Result<Option<String>> {
-        self.menu_state = if allow_browser { MenuState::PromptWithBrowser } else { MenuState::CancelOnly };
+        // ONLY change the state if we didn't intentionally set a custom menu beforehand!
+        if self.menu_state == MenuState::Default {
+            self.menu_state = if allow_browser { MenuState::PromptWithBrowser } else { MenuState::CancelOnly };
+        }
+
         self.status_time = None;
         let mut input = String::new();
 
@@ -1589,7 +1631,22 @@ impl Editor {
             let (_, rows) = terminal::size()?;
             let mut stdout = stdout();
 
-            let cursor_x = prompt_text.len() + input.len();
+            // Default cursor calculation
+            let mut cursor_x = prompt_text.len() + input.len();
+
+            // Adjust cursor_x if we are in SpellCheck by adding the visual width of the suggestions
+            if self.menu_state == MenuState::SpellCheck {
+                if !self.current_suggestions.is_empty() {
+                    for (i, sug) in self.current_suggestions.iter().enumerate() {
+                        let num_str = format!("{}", i + 1);
+                        // Add up: number length + space + word length + trailing spaces
+                        cursor_x += num_str.len() + 1 + sug.len() + 3;
+                    }
+                } else {
+                    cursor_x += "No suggestions   ".len();
+                }
+            }
+
             queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
             stdout.flush()?;
 
@@ -1776,46 +1833,86 @@ impl Editor {
 
     fn spell_check(&mut self) -> io::Result<()> {
         if self.dictionary.is_none() {
-            self.set_status(String::from("Loading dictionary..."));
-            self.draw_screen()?;
             self.dictionary = Some(Self::load_dictionary());
         }
 
-        if self.dictionary.as_ref().unwrap().is_empty() {
-            self.set_status(String::from("Error: No dictionary found at /usr/share/dict/words"));
-            return Ok(());
-        }
-
         let mut current_idx = 0;
-        let mut changes_made = 0;
+        let mut corrections = 0;
 
-        loop {
-            if let Some((word, start_idx, end_idx)) = self.find_next_misspelled(current_idx) {
-                self.cursor_y = self.buffer.char_to_line(start_idx);
-                self.cursor_x = start_idx - self.buffer.line_to_char(self.cursor_y);
-                self.desired_cursor_x = self.cursor_x;
-                self.scroll()?;
+        while let Some((word, start, end)) = self.find_next_misspelled(current_idx) {
+            let lower_word = word.to_lowercase();
 
-                let prompt_text = format!("Misspelled: '{}'. Replace with (Enter to skip): ", word);
-                if let Some(replacement) = self.prompt(&prompt_text, false)? {
-                    if !replacement.is_empty() {
-                        self.buffer.remove(start_idx..end_idx);
-                        self.buffer.insert(start_idx, &replacement);
-                        current_idx = start_idx + replacement.chars().count();
-                        changes_made += 1;
-                        self.mark_modified();
-                        continue;
-                    }
-                } else {
-                    self.set_status(String::from("Spell check cancelled."));
-                    return Ok(());
-                }
-                current_idx = end_idx;
-            } else {
-                break;
+            if self.ignored_words.contains(&lower_word) {
+                current_idx = end;
+                continue;
             }
+
+            self.cursor_y = self.buffer.char_to_line(start);
+            self.cursor_x = start - self.buffer.line_to_char(self.cursor_y);
+            self.desired_cursor_x = self.cursor_x;
+            self.scroll()?;
+
+            let word_len = word.chars().count();
+            self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + word_len));
+            self.draw_screen()?;
+
+            let dict = self.dictionary.as_ref().unwrap();
+            let suggestions = Self::get_suggestions(&lower_word, dict);
+
+            // 1. Give the raw data to the Editor so it can render it
+            self.current_suggestions = suggestions.into_iter().take(4).collect();
+
+            // 2. Switch to the SpellCheck menu before prompting
+            self.menu_state = MenuState::SpellCheck;
+
+            // 3. Just prompt normally! No more giant string.
+            let choice_result = self.prompt("Replace with: ", false)?;
+
+            // 4. Revert state and clear the suggestions
+            self.menu_state = MenuState::Default;
+            let current_suggs_copy = self.current_suggestions.clone();
+            self.current_suggestions.clear();
+
+            if let Some(choice) = choice_result {
+                let choice_clean = choice.trim().to_lowercase();
+
+                if choice_clean == "i" {
+                    self.ignored_words.insert(lower_word);
+                    current_idx = end;
+                } else if choice_clean == "a" {
+                    self.dictionary.as_mut().unwrap().insert(lower_word);
+                    current_idx = end;
+                } else if let Ok(num) = choice_clean.parse::<usize>() {
+                    // Validate against the copy we just made
+                    if num > 0 && num <= current_suggs_copy.len() {
+                        let replacement = &current_suggs_copy[num - 1];
+                        self.buffer.remove(start..end);
+                        self.buffer.insert(start, replacement);
+                        current_idx = start + replacement.chars().count();
+                        corrections += 1;
+                        self.mark_modified();
+                    } else {
+                        current_idx = end;
+                    }
+                } else if !choice.is_empty() {
+                    self.buffer.remove(start..end);
+                    self.buffer.insert(start, &choice);
+                    current_idx = start + choice.chars().count();
+                    corrections += 1;
+                    self.mark_modified();
+                } else {
+                    current_idx = end;
+                }
+            } else {
+                self.highlight_match = None;
+                self.set_status(String::from("Spell check cancelled"));
+                return Ok(());
+            }
+
+            self.highlight_match = None;
         }
-        self.set_status(format!("Spell check complete. {} replacements made.", changes_made));
+
+        self.set_status(format!("Spell check complete. {} corrections made.", corrections));
         Ok(())
     }
 
@@ -1896,6 +1993,40 @@ impl Editor {
         }
         Ok(())
     }
+
+    fn get_suggestions(word: &str, dict: &HashSet<String>) -> Vec<String> {
+        let mut scored: Vec<(&String, usize)> = dict.iter()
+            // Optimization: Only check words with a similar length
+            .filter(|w| (w.len() as isize - word.len() as isize).abs() <= 2)
+            .map(|w| (w, edit_distance(word, w)))
+            // Only keep words that are reasonably close (max 3 typos)
+            .filter(|(_, dist)| *dist <= 3)
+            .collect();
+
+        // Sort by closest match
+        scored.sort_by_key(|&(_, dist)| dist);
+
+        // Take the top 6
+        scored.into_iter().take(6).map(|(w, _)| w.clone()).collect()
+    }
+}
+
+/// Calculates the Levenshtein distance between two strings (how many edits apart they are)
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut cache: Vec<usize> = (0..=b.len()).collect();
+    let mut result = cache.clone();
+
+    for (i, &a_char) in a.iter().enumerate() {
+        result[0] = i + 1;
+        for (j, &b_char) in b.iter().enumerate() {
+            let cost = if a_char == b_char { 0 } else { 1 };
+            result[j + 1] = (result[j] + 1).min(cache[j + 1] + 1).min(cache[j] + cost);
+        }
+        cache.copy_from_slice(&result);
+    }
+    result[b.len()]
 }
 
 fn main() -> io::Result<()> {
