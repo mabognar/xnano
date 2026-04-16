@@ -2,6 +2,8 @@
 // Written by: Matt Bognar, https://github.com/mabognar
 // Extended to include Soft-Wrap and Line Numbers
 
+mod ui;
+
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
