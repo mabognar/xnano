@@ -118,10 +118,6 @@ impl ConfigExt for Editor {
             self.save_config();
             self.clear_cache();
 
-            // Note: set_status is in ui.rs, but Editor implements it, so we can call it here
-            // if we import UiExt, or we just rely on the Editor struct knowing about it.
-            // Wait, we need to import UiExt in config.rs to call set_status.
-            // Let's just update the status message manually to avoid cyclic traits.
             self.status_message = format!("Theme changed to: {}", self.current_theme);
             self.status_time = Some(std::time::Instant::now());
         }
