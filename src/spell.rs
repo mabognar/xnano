@@ -13,67 +13,15 @@ pub trait SpellExt {
 }
 
 impl SpellExt for Editor {
-    // fn load_dictionary() -> HashSet<String> {
-    //     let mut dict = HashSet::new();
-    //
-    //     // 1. Load standard system dictionary
-    //     let dict_paths = ["/usr/share/dict/words", "/usr/dict/words"];
-    //
-    //     // ... inside fn load_dictionary() ...
-    //     for path in dict_paths {
-    //         if let Ok(file) = File::open(path) {
-    //             let reader = BufReader::new(file);
-    //             // Change map_while to flatten() to skip invalid bytes
-    //             for line in reader.lines().flatten() {
-    //                 dict.insert(line.trim().to_lowercase());
-    //             }
-    //             break;
-    //         }
-    //     }
-    //
-    //     // Do the same for the custom persistent dictionary check below it:
-    //     if let Some(mut custom_path) = Self::get_base_dir() {
-    //         custom_path.push("custom_dict.txt");
-    //         if let Ok(file) = File::open(&custom_path) {
-    //             let reader = BufReader::new(file);
-    //             for line in reader.lines().flatten() {
-    //                 dict.insert(line.trim().to_lowercase());
-    //             }
-    //         }
-    //     }
-    //
-    //     // for path in dict_paths {
-    //     //     if let Ok(file) = File::open(path) {
-    //     //         let reader = BufReader::new(file);
-    //     //         for line in reader.lines().map_while(Result::ok) {
-    //     //             dict.insert(line.trim().to_lowercase());
-    //     //         }
-    //     //         break;
-    //     //     }
-    //     // }
-    //     //
-    //     // // 2. Load custom persistent dictionary (if it exists)
-    //     // if let Some(mut custom_path) = Self::get_base_dir() {
-    //     //     custom_path.push("custom_dict.txt");
-    //     //     if let Ok(file) = File::open(&custom_path) {
-    //     //         let reader = BufReader::new(file);
-    //     //         for line in reader.lines().map_while(Result::ok) {
-    //     //             dict.insert(line.trim().to_lowercase());
-    //     //         }
-    //     //     }
-    //     // }
-    //
-    //     dict
-    // }
     fn load_dictionary() -> HashSet<String> {
         let mut dict = HashSet::new();
 
-        // 1. Load standard system dictionary safely bypassing UTF-8 decode errors
+        // 1. Load standard system dictionary
         let dict_paths = ["/usr/share/dict/words", "/usr/dict/words"];
         for path in dict_paths {
-            if let Ok(bytes) = std::fs::read(path) {
-                let content = String::from_utf8_lossy(&bytes);
-                for line in content.lines() {
+            if let Ok(file) = File::open(path) {
+                let reader = BufReader::new(file);
+                for line in reader.lines().map_while(Result::ok) {
                     dict.insert(line.trim().to_lowercase());
                 }
                 break;
@@ -83,9 +31,9 @@ impl SpellExt for Editor {
         // 2. Load custom persistent dictionary (if it exists)
         if let Some(mut custom_path) = Self::get_base_dir() {
             custom_path.push("custom_dict.txt");
-            if let Ok(bytes) = std::fs::read(&custom_path) {
-                let content = String::from_utf8_lossy(&bytes);
-                for line in content.lines() {
+            if let Ok(file) = File::open(&custom_path) {
+                let reader = BufReader::new(file);
+                for line in reader.lines().map_while(Result::ok) {
                     dict.insert(line.trim().to_lowercase());
                 }
             }
@@ -94,36 +42,6 @@ impl SpellExt for Editor {
         dict
     }
 
-    // fn find_next_misspelled(&self, start_idx: usize) -> Option<(String, usize, usize)> {
-    //     let dict = self.dictionary.as_ref().unwrap();
-    //     let mut in_word = false;
-    //     let mut word_start = 0;
-    //     let mut word = String::new();
-    //
-    //     let chars = self.buffer.chars().skip(start_idx);
-    //     for (i, c) in chars.enumerate() {
-    //         let actual_idx = start_idx + i;
-    //         if c.is_alphabetic() {
-    //             if !in_word {
-    //                 in_word = true;
-    //                 word_start = actual_idx;
-    //             }
-    //             word.push(c);
-    //         } else {
-    //             if in_word {
-    //                 if !dict.contains(&word.to_lowercase()) {
-    //                     return Some((word, word_start, actual_idx));
-    //                 }
-    //                 in_word = false;
-    //                 word.clear();
-    //             }
-    //         }
-    //     }
-    //     if in_word && !dict.contains(&word.to_lowercase()) {
-    //         return Some((word, word_start, self.buffer.len_chars()));
-    //     }
-    //     None
-    // }
     fn find_next_misspelled(&self, start_idx: usize) -> Option<(String, usize, usize)> {
         let dict = self.dictionary.as_ref().unwrap();
         let mut in_word = false;
@@ -133,9 +51,7 @@ impl SpellExt for Editor {
         let chars = self.buffer.chars().skip(start_idx);
         for (i, c) in chars.enumerate() {
             let actual_idx = start_idx + i;
-
-            // Allow alphabetic characters, and apostrophes if they are inside a word
-            if c.is_alphabetic() || (in_word && c == '\'') {
+            if c.is_alphabetic() {
                 if !in_word {
                     in_word = true;
                     word_start = actual_idx;
@@ -143,30 +59,16 @@ impl SpellExt for Editor {
                 word.push(c);
             } else {
                 if in_word {
-                    // Strip trailing apostrophe if the word ends with one (e.g., "cats'")
-                    let mut check_word = word.clone();
-                    while check_word.ends_with('\'') {
-                        check_word.pop();
-                    }
-
-                    if !check_word.is_empty() && !dict.contains(&check_word.to_lowercase()) {
-                        // Return the actual end index of the isolated word
-                        return Some((check_word.clone(), word_start, word_start + check_word.len()));
+                    if !dict.contains(&word.to_lowercase()) {
+                        return Some((word, word_start, actual_idx));
                     }
                     in_word = false;
                     word.clear();
                 }
             }
         }
-
-        if in_word {
-            let mut check_word = word.clone();
-            while check_word.ends_with('\'') {
-                check_word.pop();
-            }
-            if !check_word.is_empty() && !dict.contains(&check_word.to_lowercase()) {
-                return Some((check_word.clone(), word_start, word_start + check_word.len()));
-            }
+        if in_word && !dict.contains(&word.to_lowercase()) {
+            return Some((word, word_start, self.buffer.len_chars()));
         }
         None
     }
