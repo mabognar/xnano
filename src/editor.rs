@@ -895,12 +895,28 @@ impl Editor {
                 }
             }
 
+            // match File::create(&expanded_path) {
+            //     Ok(file) => {
+            //         if let Err(e) = self.buffer.write_to(BufWriter::new(file)) {
+            //             self.set_status(format!("Error writing file: {}", e));
+            //         } else {
+            //             self.filename = Some(new_name);
+            //             self.set_status(format!("Wrote {} lines", self.buffer.len_lines()));
+            //             self.is_modified = false;
+            //         }
+            //     }
+            //     Err(e) => self.set_status(format!("Error creating file: {}", e)),
+            // }
             match File::create(&expanded_path) {
                 Ok(file) => {
                     if let Err(e) = self.buffer.write_to(BufWriter::new(file)) {
                         self.set_status(format!("Error writing file: {}", e));
                     } else {
                         self.filename = Some(new_name);
+
+                        // --- NEW: Clear the cache so the UI applies the new syntax on next draw ---
+                        self.highlight_cache.clear();
+
                         self.set_status(format!("Wrote {} lines", self.buffer.len_lines()));
                         self.is_modified = false;
                     }

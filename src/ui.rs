@@ -88,24 +88,43 @@ impl UiExt for Editor {
         let dollar_bg = if is_dark { Color::Rgb { r: 180, g: 180, b: 180 } } else { Color::Rgb { r: 80, g: 80, b: 80 } };
         let dollar_fg = if is_dark { Color::Black } else { Color::White };
 
-        queue!(stdout, cursor::MoveTo(0, 0),
-            SetBackgroundColor(ui_bg), SetForegroundColor(title_fg))?;
+        queue!(stdout, cursor::MoveTo(0, 0), SetBackgroundColor(ui_bg))?;
+
         let title = "   xnano";
         let file_display = self.filename.as_deref().unwrap_or("New Buffer");
 
-        let center_start = (cols as usize).saturating_sub(file_display.len()) / 2;
-        let pad1_len = center_start.saturating_sub(title.len());
-        let pad1 = " ".repeat(pad1_len);
-        let left_and_center = format!("{}{}{}", title, pad1, file_display);
+        // Format the spacing and the filename independently
+        let file_section = format!("     {}", file_display);
+
+        let right_indicator_len = if self.is_modified { "[ Modified ]   ".len() } else { 0 };
+        let max_allowable_len = (cols as usize).saturating_sub(right_indicator_len);
+        let full_len = title.chars().count() + file_section.chars().count();
+
+        // Safeguard: Truncate only the file path side if it overflows
+        let mut final_file_section = file_section.clone();
+        if full_len > max_allowable_len {
+            let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count());
+            if allowed_file_len > 3 {
+                final_file_section = file_section.chars().take(allowed_file_len.saturating_sub(3)).collect();
+                final_file_section.push_str("...");
+            } else {
+                final_file_section = String::new();
+            }
+        }
+
+        let printed_left_len = title.chars().count() + final_file_section.chars().count();
 
         if self.is_modified {
             let right = "[ Modified ]   ";
-            let pad2_len = (cols as usize).saturating_sub(left_and_center.len() + right.len());
+            let pad2_len = (cols as usize).saturating_sub(printed_left_len + right.len());
             let pad2 = " ".repeat(pad2_len);
 
             queue!(
                 stdout,
-                Print(left_and_center),
+                SetForegroundColor(menu_key_fg), // Color "xnano"
+                Print(title),
+                SetForegroundColor(title_fg),    // Color filename
+                Print(&final_file_section),
                 Print(pad2),
                 SetForegroundColor(title_fg),
                 Print(right),
@@ -113,11 +132,14 @@ impl UiExt for Editor {
                 SetBackgroundColor(Color::Reset)
             )?;
         } else {
-            let pad2_len = (cols as usize).saturating_sub(left_and_center.len());
+            let pad2_len = (cols as usize).saturating_sub(printed_left_len);
             let pad2 = " ".repeat(pad2_len);
             queue!(
                 stdout,
-                Print(left_and_center),
+                SetForegroundColor(menu_key_fg), // Color "xnano"
+                Print(title),
+                SetForegroundColor(title_fg),    // Color filename
+                Print(&final_file_section),
                 Print(pad2),
                 SetForegroundColor(Color::Reset),
                 SetBackgroundColor(Color::Reset)
@@ -188,10 +210,8 @@ impl UiExt for Editor {
                             continue;
                         }
 
-                        // ---> ADD THIS LINE to calculate absolute index <---
                         let absolute_char_idx = self.buffer.line_to_char(file_y) + line_char_idx;
 
-                        // ---> REPLACE the existing `is_highlighted` calculation <---
                         let is_highlighted = if line_has_search_highlight {
                             if let Some((_, h_start, h_end)) = self.highlight_match {
                                 line_char_idx >= h_start && line_char_idx < h_end
@@ -201,12 +221,6 @@ impl UiExt for Editor {
                         } else {
                             false
                         };
-
-                        // let is_highlighted = if line_has_search_highlight {
-                        //     if let Some((_, h_start, h_end)) = self.highlight_match {
-                        //         line_char_idx >= h_start && line_char_idx < h_end
-                        //     } else { false }
-                        // } else { false };
 
                         let display_chars = if ch == '\t' { vec![' '; 4 - (visual_x % 4)] } else { vec![ch] };
 
@@ -574,6 +588,9 @@ impl UiExt for Editor {
 
         loop {
             let mut entries: Vec<(String, bool)> = Vec::new();
+
+            entries.push((String::from("."), true));
+
             if current_dir.parent().is_some() {
                 entries.push((String::from(".."), true));
             }
@@ -610,9 +627,6 @@ impl UiExt for Editor {
                 entries.extend(dot_files);
             }
 
-            if entries.is_empty() {
-                entries.push((String::from("."), true));
-            }
             if selected >= entries.len() {
                 selected = entries.len().saturating_sub(1);
             }
@@ -633,19 +647,28 @@ impl UiExt for Editor {
 
                 let ui_bg = Self::derive_ui_color(theme_bg_raw, is_dark);
                 let title_fg = if is_dark { Color::Reset } else { Color::Rgb { r: 0, g: 50, b: 150 } };
+                let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
 
                 queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::All))?;
 
-                queue!(stdout, cursor::MoveTo(0, 0), SetBackgroundColor(ui_bg), SetForegroundColor(title_fg))?;
+                queue!(stdout, cursor::MoveTo(0, 0), SetBackgroundColor(ui_bg))?;
                 let title = " xnano File Browser ";
                 let path_str = current_dir.to_string_lossy();
                 let center_start = (cols as usize).saturating_sub(path_str.len()) / 2;
                 let pad1_len = center_start.saturating_sub(title.len());
                 let pad1 = " ".repeat(pad1_len);
-                let top_line = format!("{}{}{}", title, pad1, path_str);
-                let pad2_len = (cols as usize).saturating_sub(top_line.len());
+
+                let combined_len = title.len() + pad1.len() + path_str.len();
+                let pad2_len = (cols as usize).saturating_sub(combined_len);
                 let pad2 = " ".repeat(pad2_len);
-                queue!(stdout, Print(format!("{}{}", top_line, pad2)))?;
+
+                queue!(
+                    stdout,
+                    SetForegroundColor(menu_key_fg),
+                    Print(title),
+                    SetForegroundColor(title_fg),
+                    Print(format!("{}{}{}", pad1, path_str, pad2))
+                )?;
 
                 for i in 0..visible_rows {
                     queue!(stdout, cursor::MoveTo(0, (i + 1) as u16))?;
@@ -674,7 +697,6 @@ impl UiExt for Editor {
                     }
                 }
 
-                let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
                 let menu_text_fg = if is_dark { Color::Reset } else { Color::Black };
                 let col_width = (cols as usize) / 6;
 
@@ -725,7 +747,40 @@ impl UiExt for Editor {
                         KeyCode::Enter => {
                             let (name, is_dir) = &entries[selected];
                             if *is_dir {
-                                if name == ".." {
+                                if name == "." {
+                                    let mut input = String::new();
+                                    let prompt_prefix = " File name to write: ";
+
+                                    loop {
+                                        queue!(stdout, cursor::MoveTo(0, rows - 3), SetBackgroundColor(ui_bg), SetForegroundColor(title_fg))?;
+
+                                        let prompt_str = format!("{}{}", prompt_prefix, input);
+                                        queue!(stdout, Print(&prompt_str), terminal::Clear(ClearType::UntilNewLine))?;
+
+                                        let cursor_x = prompt_prefix.len() + input.len();
+                                        queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
+
+                                        stdout.flush()?;
+
+                                        if let Event::Key(k) = event::read()? {
+                                            match k.code {
+                                                KeyCode::Enter => {
+                                                    if !input.is_empty() {
+                                                        let target = current_dir.join(&input);
+                                                        return Ok(Some(target.to_string_lossy().into_owned()));
+                                                    }
+                                                    break;
+                                                }
+                                                KeyCode::Esc => break,
+                                                KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => break,
+                                                KeyCode::Backspace => { input.pop(); }
+                                                KeyCode::Char(c) if !c.is_control() => { input.push(c); }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                    continue;
+                                } else if name == ".." {
                                     if let Some(parent) = current_dir.parent() {
                                         current_dir = parent.to_path_buf();
                                     }
@@ -793,7 +848,7 @@ impl UiExt for Editor {
             "",
             "  Search & Replace:",
             "    Ctrl+W, F6       Where is (Search)",
-            "    Ctrl+\\          Search and Replace",
+            "    Ctrl+\\           Search and Replace",
             "",
             "  File & System:",
             "    Ctrl+O, F3       Write Out (Save)",
