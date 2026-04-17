@@ -7,7 +7,7 @@ use std::io::{self, stdout, BufWriter};
 use ropey::Rope;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
-use crossterm::{execute, terminal, event::{self, Event, KeyCode, KeyModifiers}};
+use crossterm::{execute, terminal, event::{self, Event, KeyCode, KeyModifiers, KeyEventKind}};
 
 // We pull in the trait definitions so this file knows about draw_screen, spell_check, etc.
 use crate::config::ConfigExt;
@@ -382,6 +382,11 @@ impl Editor {
 
     pub(crate) fn process_keypress(&mut self) -> io::Result<()> {
         if let Event::Key(key) = event::read()? {
+            // Ignore key release events on Windows
+            if key.kind != event::KeyEventKind::Press {
+                return Ok(());
+            }
+
             self.highlight_match = None;
 
             let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);

@@ -18,26 +18,50 @@ impl SpellExt for Editor {
 
         // 1. Load standard system dictionary
         let dict_paths = ["/usr/share/dict/words", "/usr/dict/words"];
+
+        // ... inside fn load_dictionary() ...
         for path in dict_paths {
             if let Ok(file) = File::open(path) {
                 let reader = BufReader::new(file);
-                for line in reader.lines().map_while(Result::ok) {
+                // Change map_while to flatten() to skip invalid bytes
+                for line in reader.lines().flatten() {
                     dict.insert(line.trim().to_lowercase());
                 }
                 break;
             }
         }
 
-        // 2. Load custom persistent dictionary (if it exists)
+        // Do the same for the custom persistent dictionary check below it:
         if let Some(mut custom_path) = Self::get_base_dir() {
             custom_path.push("custom_dict.txt");
             if let Ok(file) = File::open(&custom_path) {
                 let reader = BufReader::new(file);
-                for line in reader.lines().map_while(Result::ok) {
+                for line in reader.lines().flatten() {
                     dict.insert(line.trim().to_lowercase());
                 }
             }
         }
+
+        // for path in dict_paths {
+        //     if let Ok(file) = File::open(path) {
+        //         let reader = BufReader::new(file);
+        //         for line in reader.lines().map_while(Result::ok) {
+        //             dict.insert(line.trim().to_lowercase());
+        //         }
+        //         break;
+        //     }
+        // }
+        //
+        // // 2. Load custom persistent dictionary (if it exists)
+        // if let Some(mut custom_path) = Self::get_base_dir() {
+        //     custom_path.push("custom_dict.txt");
+        //     if let Ok(file) = File::open(&custom_path) {
+        //         let reader = BufReader::new(file);
+        //         for line in reader.lines().map_while(Result::ok) {
+        //             dict.insert(line.trim().to_lowercase());
+        //         }
+        //     }
+        // }
 
         dict
     }
