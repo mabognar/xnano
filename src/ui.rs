@@ -91,10 +91,29 @@ impl UiExt for Editor {
         queue!(stdout, cursor::MoveTo(0, 0), SetBackgroundColor(ui_bg))?;
 
         let title = "   xnano";
-        let file_display = self.filename.as_deref().unwrap_or("New Buffer");
+
+        let file_display_string = match self.filename.as_deref() {
+            Some(name) => {
+                let path = std::path::Path::new(name);
+                if path.is_absolute() {
+                    name.to_string()
+                } else if let Ok(cwd) = std::env::current_dir() {
+                    let full_path = cwd.join(path);
+                    // Canonicalize resolves '..' and symlinks if the file exists on disk.
+                    // If the file is new and doesn't exist yet, fallback to the basic joined path.
+                    std::fs::canonicalize(&full_path)
+                        .unwrap_or(full_path)
+                        .to_string_lossy()
+                        .into_owned()
+                } else {
+                    name.to_string()
+                }
+            }
+            None => String::from("New Buffer"),
+        };
 
         // Format the spacing and the filename independently
-        let file_section = format!("     {}", file_display);
+        let file_section = format!("     {}", file_display_string);
 
         let right_indicator_len = if self.is_modified { "[ Modified ]   ".len() } else { 0 };
         let max_allowable_len = (cols as usize).saturating_sub(right_indicator_len);
@@ -330,7 +349,7 @@ impl UiExt for Editor {
             terminal_y += 1;
             file_y += 1;
         }
-        
+
         queue!(stdout, cursor::MoveTo(0, rows - 3))?;
 
         if !self.status_message.is_empty() {
