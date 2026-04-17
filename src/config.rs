@@ -18,6 +18,7 @@ pub trait ConfigExt {
     fn is_dark_theme(theme: &Theme) -> bool;
     fn derive_ui_color(bg: syntect::highlighting::Color, is_dark: bool) -> Color;
     fn cycle_theme(&mut self);
+    fn update_cursor_color(&self);
 }
 
 impl ConfigExt for Editor {
@@ -58,23 +59,19 @@ impl ConfigExt for Editor {
 
     fn load_config() -> (String, bool, bool) {
         let mut theme = String::from("base16-ocean.dark");
-        let mut line_numbers = false;
+        let mut line_numbers = true;
         let mut soft_wrap = false;
 
         if let Some(path) = Self::get_config_path() {
-            if let Ok(contents) = fs::read_to_string(path) {
-                for line in contents.lines() {
+            if let Ok(content) = fs::read_to_string(path) {
+                for line in content.lines() {
                     let parts: Vec<&str> = line.splitn(2, '=').collect();
                     if parts.len() == 2 {
-                        match parts[0].trim() {
-                            "theme" => theme = parts[1].trim().to_string(),
-                            "line_numbers" => line_numbers = parts[1].trim() == "true",
-                            "soft_wrap" => soft_wrap = parts[1].trim() == "true",
+                        match parts[0] {
+                            "theme" => theme = parts[1].to_string(),
+                            "line_numbers" => line_numbers = parts[1] == "true",
+                            "soft_wrap" => soft_wrap = parts[1] == "true",
                             _ => {}
-                        }
-                    } else if parts.len() == 1 && !line.trim().is_empty() {
-                        if !line.contains('=') {
-                            theme = line.trim().to_string();
                         }
                     }
                 }
@@ -120,6 +117,14 @@ impl ConfigExt for Editor {
 
             self.status_message = format!("Theme changed to: {}", self.current_theme);
             self.status_time = Some(std::time::Instant::now());
+
+            // Trigger the cursor color update whenever the theme changes
+            self.update_cursor_color();
         }
+    }
+
+    fn update_cursor_color(&self) {
+        print!("\x1b]12;#888888\x07");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
     }
 }

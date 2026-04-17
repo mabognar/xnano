@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use std::path::Path;
 use std::fs::{self, File};
 use std::env;
-use std::io::{self, stdout, BufWriter};
+use std::io::{self, BufWriter};
 use ropey::Rope;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
@@ -166,10 +166,53 @@ impl Editor {
         self.clear_cache();
     }
 
+    // pub fn run(&mut self) -> io::Result<()> {
+    //     terminal::enable_raw_mode()?;
+    //     let mut stdout = stdout();
+    //     execute!(stdout, terminal::EnterAlternateScreen)?;
+    //
+    //     loop {
+    //         if let Some(time) = self.status_time {
+    //             if time.elapsed() >= Duration::from_secs(3) {
+    //                 self.clear_status();
+    //             }
+    //         }
+    //
+    //         self.draw_screen()?;
+    //         if self.should_quit {
+    //             break;
+    //         }
+    //
+    //         let timeout = if let Some(time) = self.status_time {
+    //             let elapsed = time.elapsed();
+    //             if elapsed >= Duration::from_secs(3) {
+    //                 Duration::from_millis(1)
+    //             } else {
+    //                 Duration::from_secs(3) - elapsed
+    //             }
+    //         } else {
+    //             Duration::from_secs(3600)
+    //         };
+    //
+    //         if event::poll(timeout)? {
+    //             self.process_keypress()?;
+    //         } else {
+    //             self.clear_status();
+    //         }
+    //     }
+    //
+    //     execute!(stdout, terminal::LeaveAlternateScreen)?;
+    //     terminal::disable_raw_mode()?;
+    //     Ok(())
+    // }
+
     pub fn run(&mut self) -> io::Result<()> {
         terminal::enable_raw_mode()?;
-        let mut stdout = stdout();
+        let mut stdout = std::io::stdout();
         execute!(stdout, terminal::EnterAlternateScreen)?;
+
+        // --- NEW: Set initial cursor color ---
+        self.update_cursor_color();
 
         loop {
             if let Some(time) = self.status_time {
@@ -203,8 +246,69 @@ impl Editor {
 
         execute!(stdout, terminal::LeaveAlternateScreen)?;
         terminal::disable_raw_mode()?;
+
+        // Reset cursor color on exit
+        print!("\x1b]112\x07");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+
         Ok(())
     }
+
+
+    // pub(crate) fn scroll(&mut self) -> io::Result<()> {
+    //     let (cols, rows) = terminal::size()?;
+    //     let visible_rows = rows.saturating_sub(4) as usize;
+    //     let cols_u = cols as usize;
+    //
+    //     let max_line_num_len = self.buffer.len_lines().to_string().len();
+    //     let gutter_width = if self.show_line_numbers { max_line_num_len + 1 } else { 0 };
+    //     let available_width = std::cmp::max(1, cols_u.saturating_sub(gutter_width));
+    //
+    //     if self.soft_wrap {
+    //         self.col_offset = 0;
+    //         if self.cursor_y < self.row_offset {
+    //             self.row_offset = self.cursor_y;
+    //         }
+    //
+    //         loop {
+    //             let mut screen_y_offset = 0;
+    //             for i in self.row_offset..self.cursor_y {
+    //                 let w = self.get_visual_line_width(i);
+    //                 screen_y_offset += if w == 0 { 1 } else { (w - 1) / available_width + 1 };
+    //             }
+    //             let cursor_visual = self.get_visual_cursor_x();
+    //             screen_y_offset += cursor_visual / available_width;
+    //
+    //             if screen_y_offset >= visible_rows && self.row_offset < self.cursor_y {
+    //                 self.row_offset += 1;
+    //             } else {
+    //                 break;
+    //             }
+    //         }
+    //     } else {
+    //         // -- Reverted back to exact original vertical line-by-line scrolling --
+    //         if self.cursor_y < self.row_offset {
+    //             self.row_offset = self.cursor_y;
+    //         }
+    //         if self.cursor_y >= self.row_offset + visible_rows {
+    //             self.row_offset = self.cursor_y - visible_rows + 1;
+    //         }
+    //
+    //         let visual_x = self.get_visual_cursor_x();
+    //         let left_bound = if self.col_offset > 0 { self.col_offset + 1 } else { 0 };
+    //
+    //         // -- Fixed horizontal scrolling to move smoothly by 1 character --
+    //         if visual_x < left_bound {
+    //             // Smoothly slide left
+    //             self.col_offset = visual_x.saturating_sub(1);
+    //         } else if visual_x >= self.col_offset + available_width.saturating_sub(1) {
+    //             // Smoothly slide right
+    //             self.col_offset = visual_x.saturating_sub(available_width.saturating_sub(2));
+    //         }
+    //     }
+    //
+    //     Ok(())
+    // }
 
     pub(crate) fn scroll(&mut self) -> io::Result<()> {
         let (cols, rows) = terminal::size()?;
@@ -216,26 +320,7 @@ impl Editor {
         let available_width = std::cmp::max(1, cols_u.saturating_sub(gutter_width));
 
         if self.soft_wrap {
-            self.col_offset = 0;
-            if self.cursor_y < self.row_offset {
-                self.row_offset = self.cursor_y;
-            }
-
-            loop {
-                let mut screen_y_offset = 0;
-                for i in self.row_offset..self.cursor_y {
-                    let w = self.get_visual_line_width(i);
-                    screen_y_offset += if w == 0 { 1 } else { (w - 1) / available_width + 1 };
-                }
-                let cursor_visual = self.get_visual_cursor_x();
-                screen_y_offset += cursor_visual / available_width;
-
-                if screen_y_offset >= visible_rows && self.row_offset < self.cursor_y {
-                    self.row_offset += 1;
-                } else {
-                    break;
-                }
-            }
+            // ... [Keep your existing soft wrap logic here] ...
         } else {
             // --- Vertical Scrolling ---
             if self.cursor_y < self.row_offset {
@@ -257,9 +342,10 @@ impl Editor {
                 self.col_offset = visual_x.saturating_sub(available_width / 2);
             }
         }
+
         Ok(())
     }
-
+    
     pub(crate) fn get_cursor_char_idx(&self) -> usize {
         self.buffer.line_to_char(self.cursor_y) + self.cursor_x
     }
@@ -914,6 +1000,7 @@ impl Editor {
                 }
                 Err(e) => self.set_status(format!("Error creating file: {}", e)),
             }
+
         }
         Ok(())
     }
