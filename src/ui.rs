@@ -169,15 +169,24 @@ impl UiExt for Editor {
             if m < cursor_absolute { (m, cursor_absolute) } else { (cursor_absolute, m) }
         });
 
+        // --- FIX 1: ANSI state tracking and Hoisted Parser ---
+        let mut last_fg: Option<Color> = None;
+        let mut last_bg: Option<Color> = None;
+        let mut fallback_highlighter = None;
+
         let mut terminal_y = 0;
         let mut file_y = self.row_offset;
 
         while terminal_y < visible_rows {
             if file_y < self.buffer.len_lines() {
+                // Instantiating HighlightLines is expensive. We only do it ONCE per frame
+                // and reuse it for any uncached lines we encounter.
                 if !self.highlight_cache.contains_key(&file_y) {
-                    let mut highlighter = HighlightLines::new(syntax, theme);
+                    if fallback_highlighter.is_none() {
+                        fallback_highlighter = Some(HighlightLines::new(syntax, theme));
+                    }
                     let line_str = self.buffer.line(file_y).to_string();
-                    let ranges = highlighter.highlight_line(&line_str, &self.syntax_set).unwrap();
+                    let ranges = fallback_highlighter.as_mut().unwrap().highlight_line(&line_str, &self.syntax_set).unwrap();
                     let owned_ranges: Vec<(Style, String)> = ranges.into_iter().map(|(s, t)| (s, t.to_string())).collect();
                     self.highlight_cache.insert(file_y, owned_ranges);
                 }
@@ -191,7 +200,9 @@ impl UiExt for Editor {
                 queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
                 if self.show_line_numbers {
                     let num_str = format!("{:>width$} ", file_y + 1, width = max_line_num_len);
-                    queue!(stdout, SetBackgroundColor(default_cross_bg), SetForegroundColor(menu_key_fg), Print(num_str))?;
+                    if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
+                    if last_fg != Some(menu_key_fg) { queue!(stdout, SetForegroundColor(menu_key_fg))?; last_fg = Some(menu_key_fg); }
+                    queue!(stdout, Print(num_str))?;
                 }
 
                 let mut printed_on_current_line = 0;
@@ -202,7 +213,15 @@ impl UiExt for Editor {
                     let syn_bg = style.background;
                     let cross_bg = Color::Rgb { r: syn_bg.r, g: syn_bg.g, b: syn_bg.b };
 
-                    queue!(stdout, SetForegroundColor(cross_color), SetBackgroundColor(cross_bg))?;
+                    // --- FIX 2: Only issue ANSI codes if the color actually changes ---
+                    if last_fg != Some(cross_color) {
+                        queue!(stdout, SetForegroundColor(cross_color))?;
+                        last_fg = Some(cross_color);
+                    }
+                    if last_bg != Some(cross_bg) {
+                        queue!(stdout, SetBackgroundColor(cross_bg))?;
+                        last_bg = Some(cross_bg);
+                    }
 
                     for ch in text.chars() {
                         if ch == '\n' || ch == '\r' {
@@ -227,29 +246,45 @@ impl UiExt for Editor {
                         for display_ch in display_chars {
                             if self.soft_wrap {
                                 if printed_on_current_line >= available_width {
-                                    queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::UntilNewLine))?;
+                                    if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
+                                    queue!(stdout, terminal::Clear(ClearType::UntilNewLine))?;
                                     terminal_y += 1;
                                     if terminal_y >= visible_rows { break 'char_loop; }
 
                                     queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
                                     if self.show_line_numbers {
-                                        queue!(stdout, SetBackgroundColor(default_cross_bg), Print(" ".repeat(gutter_width)))?;
+                                        queue!(stdout, Print(" ".repeat(gutter_width)))?;
                                     }
-                                    queue!(stdout, SetForegroundColor(cross_color), SetBackgroundColor(cross_bg))?;
+                                    // Re-apply styles after clearing the line
+                                    if last_fg != Some(cross_color) { queue!(stdout, SetForegroundColor(cross_color))?; last_fg = Some(cross_color); }
+                                    if last_bg != Some(cross_bg) { queue!(stdout, SetBackgroundColor(cross_bg))?; last_bg = Some(cross_bg); }
                                     printed_on_current_line = 0;
                                 }
 
-                                if is_highlighted { queue!(stdout, SetBackgroundColor(Color::Red), SetForegroundColor(Color::White))?; }
+                                if is_highlighted {
+                                    if last_bg != Some(Color::Red) { queue!(stdout, SetBackgroundColor(Color::Red))?; last_bg = Some(Color::Red); }
+                                    if last_fg != Some(Color::White) { queue!(stdout, SetForegroundColor(Color::White))?; last_fg = Some(Color::White); }
+                                }
                                 queue!(stdout, Print(display_ch))?;
-                                if is_highlighted { queue!(stdout, SetBackgroundColor(cross_bg), SetForegroundColor(cross_color))?; }
+                                if is_highlighted {
+                                    // Revert immediately back to the current token's syntax color
+                                    if last_bg != Some(cross_bg) { queue!(stdout, SetBackgroundColor(cross_bg))?; last_bg = Some(cross_bg); }
+                                    if last_fg != Some(cross_color) { queue!(stdout, SetForegroundColor(cross_color))?; last_fg = Some(cross_color); }
+                                }
 
                                 printed_on_current_line += 1;
                                 visual_x += 1;
                             } else {
                                 if visual_x >= self.col_offset && printed_on_current_line < available_width {
-                                    if is_highlighted { queue!(stdout, SetBackgroundColor(Color::Red), SetForegroundColor(Color::White))?; }
+                                    if is_highlighted {
+                                        if last_bg != Some(Color::Red) { queue!(stdout, SetBackgroundColor(Color::Red))?; last_bg = Some(Color::Red); }
+                                        if last_fg != Some(Color::White) { queue!(stdout, SetForegroundColor(Color::White))?; last_fg = Some(Color::White); }
+                                    }
                                     queue!(stdout, Print(display_ch))?;
-                                    if is_highlighted { queue!(stdout, SetBackgroundColor(cross_bg), SetForegroundColor(cross_color))?; }
+                                    if is_highlighted {
+                                        if last_bg != Some(cross_bg) { queue!(stdout, SetBackgroundColor(cross_bg))?; last_bg = Some(cross_bg); }
+                                        if last_fg != Some(cross_color) { queue!(stdout, SetForegroundColor(cross_color))?; last_fg = Some(cross_color); }
+                                    }
                                     printed_on_current_line += 1;
                                 }
                                 visual_x += 1;
@@ -259,33 +294,160 @@ impl UiExt for Editor {
                     }
                 }
 
-                queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::UntilNewLine))?;
+                if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
+                queue!(stdout, terminal::Clear(ClearType::UntilNewLine))?;
 
                 if !self.soft_wrap {
                     let needs_left_dollar = self.col_offset > 0;
                     let needs_right_dollar = visual_x > self.col_offset + available_width;
 
                     if needs_left_dollar {
-                        queue!(stdout, cursor::MoveTo(gutter_width as u16, (terminal_y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
+                        if last_bg != Some(dollar_bg) { queue!(stdout, SetBackgroundColor(dollar_bg))?; last_bg = Some(dollar_bg); }
+                        if last_fg != Some(dollar_fg) { queue!(stdout, SetForegroundColor(dollar_fg))?; last_fg = Some(dollar_fg); }
+                        queue!(stdout, cursor::MoveTo(gutter_width as u16, (terminal_y + 1) as u16), Print('$'))?;
                     }
                     if needs_right_dollar {
-                        queue!(stdout, cursor::MoveTo(cols - 1, (terminal_y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
+                        if last_bg != Some(dollar_bg) { queue!(stdout, SetBackgroundColor(dollar_bg))?; last_bg = Some(dollar_bg); }
+                        if last_fg != Some(dollar_fg) { queue!(stdout, SetForegroundColor(dollar_fg))?; last_fg = Some(dollar_fg); }
+                        queue!(stdout, cursor::MoveTo((cols - 1) as u16, (terminal_y + 1) as u16), Print('$'))?;
                     }
                 }
 
-                queue!(stdout, SetBackgroundColor(default_cross_bg), SetForegroundColor(Color::Reset))?;
+                // Reset before moving to the next line
+                if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
+                if last_fg != Some(Color::Reset) { queue!(stdout, SetForegroundColor(Color::Reset))?; last_fg = Some(Color::Reset); }
 
             } else {
                 queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
                 if self.show_line_numbers {
-                    queue!(stdout, SetBackgroundColor(default_cross_bg), Print(" ".repeat(gutter_width)))?;
+                    if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
+                    queue!(stdout, Print(" ".repeat(gutter_width)))?;
                 }
-                queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::UntilNewLine))?;
+                if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
+                queue!(stdout, terminal::Clear(ClearType::UntilNewLine))?;
             }
 
             terminal_y += 1;
             file_y += 1;
         }
+
+        // let mut terminal_y = 0;
+        // let mut file_y = self.row_offset;
+        //
+        // while terminal_y < visible_rows {
+        //     if file_y < self.buffer.len_lines() {
+        //         if !self.highlight_cache.contains_key(&file_y) {
+        //             let mut highlighter = HighlightLines::new(syntax, theme);
+        //             let line_str = self.buffer.line(file_y).to_string();
+        //             let ranges = highlighter.highlight_line(&line_str, &self.syntax_set).unwrap();
+        //             let owned_ranges: Vec<(Style, String)> = ranges.into_iter().map(|(s, t)| (s, t.to_string())).collect();
+        //             self.highlight_cache.insert(file_y, owned_ranges);
+        //         }
+        //
+        //         let ranges = self.highlight_cache.get(&file_y).unwrap();
+        //
+        //         let mut visual_x = 0;
+        //         let mut line_char_idx = 0;
+        //         let line_has_search_highlight = self.highlight_match.map_or(false, |(h_y, _, _)| h_y == file_y);
+        //
+        //         queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
+        //         if self.show_line_numbers {
+        //             let num_str = format!("{:>width$} ", file_y + 1, width = max_line_num_len);
+        //             queue!(stdout, SetBackgroundColor(default_cross_bg), SetForegroundColor(menu_key_fg), Print(num_str))?;
+        //         }
+        //
+        //         let mut printed_on_current_line = 0;
+        //
+        //         'char_loop: for (style, text) in ranges {
+        //             let syn_color = style.foreground;
+        //             let cross_color = Color::Rgb { r: syn_color.r, g: syn_color.g, b: syn_color.b };
+        //             let syn_bg = style.background;
+        //             let cross_bg = Color::Rgb { r: syn_bg.r, g: syn_bg.g, b: syn_bg.b };
+        //
+        //             queue!(stdout, SetForegroundColor(cross_color), SetBackgroundColor(cross_bg))?;
+        //
+        //             for ch in text.chars() {
+        //                 if ch == '\n' || ch == '\r' {
+        //                     line_char_idx += 1;
+        //                     continue;
+        //                 }
+        //
+        //                 let absolute_char_idx = self.buffer.line_to_char(file_y) + line_char_idx;
+        //
+        //                 let is_highlighted = if line_has_search_highlight {
+        //                     if let Some((_, h_start, h_end)) = self.highlight_match {
+        //                         line_char_idx >= h_start && line_char_idx < h_end
+        //                     } else { false }
+        //                 } else if let Some((m_start, m_end)) = mark_range {
+        //                     absolute_char_idx >= m_start && absolute_char_idx < m_end
+        //                 } else {
+        //                     false
+        //                 };
+        //
+        //                 let display_chars = if ch == '\t' { vec![' '; 4 - (visual_x % 4)] } else { vec![ch] };
+        //
+        //                 for display_ch in display_chars {
+        //                     if self.soft_wrap {
+        //                         if printed_on_current_line >= available_width {
+        //                             queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::UntilNewLine))?;
+        //                             terminal_y += 1;
+        //                             if terminal_y >= visible_rows { break 'char_loop; }
+        //
+        //                             queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
+        //                             if self.show_line_numbers {
+        //                                 queue!(stdout, SetBackgroundColor(default_cross_bg), Print(" ".repeat(gutter_width)))?;
+        //                             }
+        //                             queue!(stdout, SetForegroundColor(cross_color), SetBackgroundColor(cross_bg))?;
+        //                             printed_on_current_line = 0;
+        //                         }
+        //
+        //                         if is_highlighted { queue!(stdout, SetBackgroundColor(Color::Red), SetForegroundColor(Color::White))?; }
+        //                         queue!(stdout, Print(display_ch))?;
+        //                         if is_highlighted { queue!(stdout, SetBackgroundColor(cross_bg), SetForegroundColor(cross_color))?; }
+        //
+        //                         printed_on_current_line += 1;
+        //                         visual_x += 1;
+        //                     } else {
+        //                         if visual_x >= self.col_offset && printed_on_current_line < available_width {
+        //                             if is_highlighted { queue!(stdout, SetBackgroundColor(Color::Red), SetForegroundColor(Color::White))?; }
+        //                             queue!(stdout, Print(display_ch))?;
+        //                             if is_highlighted { queue!(stdout, SetBackgroundColor(cross_bg), SetForegroundColor(cross_color))?; }
+        //                             printed_on_current_line += 1;
+        //                         }
+        //                         visual_x += 1;
+        //                     }
+        //                 }
+        //                 line_char_idx += 1;
+        //             }
+        //         }
+        //
+        //         queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::UntilNewLine))?;
+        //
+        //         if !self.soft_wrap {
+        //             let needs_left_dollar = self.col_offset > 0;
+        //             let needs_right_dollar = visual_x > self.col_offset + available_width;
+        //
+        //             if needs_left_dollar {
+        //                 queue!(stdout, cursor::MoveTo(gutter_width as u16, (terminal_y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
+        //             }
+        //             if needs_right_dollar {
+        //                 queue!(stdout, cursor::MoveTo(cols - 1, (terminal_y + 1) as u16), SetBackgroundColor(dollar_bg), SetForegroundColor(dollar_fg), Print('$'))?;
+        //             }
+        //         }
+        //
+        //         queue!(stdout, SetBackgroundColor(default_cross_bg), SetForegroundColor(Color::Reset))?;
+        //
+        //     } else {
+        //         queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
+        //         if self.show_line_numbers {
+        //             queue!(stdout, SetBackgroundColor(default_cross_bg), Print(" ".repeat(gutter_width)))?;
+        //         }
+        //         queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::UntilNewLine))?;
+        //     }
+        //
+        //     terminal_y += 1;
+        //     file_y += 1;
+        // }
 
         queue!(stdout, cursor::MoveTo(0, rows - 3))?;
 

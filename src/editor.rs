@@ -7,9 +7,9 @@ use std::io::{self, stdout, BufWriter};
 use ropey::Rope;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
-use crossterm::{execute, terminal, event::{self, Event, KeyCode, KeyModifiers, KeyEventKind}};
+use crossterm::{execute, terminal, event::{self, Event, KeyCode, KeyModifiers}};
 
-// We pull in the trait definitions so this file knows about draw_screen, spell_check, etc.
+// Pull in the trait definitions so this file knows about draw_screen, spell_check, etc.
 use crate::config::ConfigExt;
 use crate::spell::SpellExt;
 use crate::ui::UiExt;
@@ -236,7 +236,25 @@ impl Editor {
                     break;
                 }
             }
+        // } else {
+        //     if self.cursor_y < self.row_offset {
+        //         self.row_offset = self.cursor_y;
+        //     }
+        //     if self.cursor_y >= self.row_offset + visible_rows {
+        //         self.row_offset = self.cursor_y - visible_rows + 1;
+        //     }
+        //
+        //     let visual_x = self.get_visual_cursor_x();
+        //     let left_bound = if self.col_offset > 0 { self.col_offset + 1 } else { 0 };
+        //
+        //     if visual_x < left_bound {
+        //         self.col_offset = visual_x.saturating_sub(available_width / 2);
+        //     } else if visual_x >= self.col_offset + available_width.saturating_sub(1) {
+        //         self.col_offset = visual_x.saturating_sub(available_width / 2);
+        //     }
+        // }
         } else {
+            // -- Reverted back to exact original vertical line-by-line scrolling --
             if self.cursor_y < self.row_offset {
                 self.row_offset = self.cursor_y;
             }
@@ -247,13 +265,16 @@ impl Editor {
             let visual_x = self.get_visual_cursor_x();
             let left_bound = if self.col_offset > 0 { self.col_offset + 1 } else { 0 };
 
+            // -- Fixed horizontal scrolling to move smoothly by 1 character --
             if visual_x < left_bound {
-                self.col_offset = visual_x.saturating_sub(available_width / 2);
+                // Smoothly slide left
+                self.col_offset = visual_x.saturating_sub(1);
             } else if visual_x >= self.col_offset + available_width.saturating_sub(1) {
-                self.col_offset = visual_x.saturating_sub(available_width / 2);
+                // Smoothly slide right
+                self.col_offset = visual_x.saturating_sub(available_width.saturating_sub(2));
             }
         }
-
+        
         Ok(())
     }
 
@@ -895,18 +916,6 @@ impl Editor {
                 }
             }
 
-            // match File::create(&expanded_path) {
-            //     Ok(file) => {
-            //         if let Err(e) = self.buffer.write_to(BufWriter::new(file)) {
-            //             self.set_status(format!("Error writing file: {}", e));
-            //         } else {
-            //             self.filename = Some(new_name);
-            //             self.set_status(format!("Wrote {} lines", self.buffer.len_lines()));
-            //             self.is_modified = false;
-            //         }
-            //     }
-            //     Err(e) => self.set_status(format!("Error creating file: {}", e)),
-            // }
             match File::create(&expanded_path) {
                 Ok(file) => {
                     if let Err(e) = self.buffer.write_to(BufWriter::new(file)) {
