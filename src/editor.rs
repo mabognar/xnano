@@ -236,45 +236,27 @@ impl Editor {
                     break;
                 }
             }
-        // } else {
-        //     if self.cursor_y < self.row_offset {
-        //         self.row_offset = self.cursor_y;
-        //     }
-        //     if self.cursor_y >= self.row_offset + visible_rows {
-        //         self.row_offset = self.cursor_y - visible_rows + 1;
-        //     }
-        //
-        //     let visual_x = self.get_visual_cursor_x();
-        //     let left_bound = if self.col_offset > 0 { self.col_offset + 1 } else { 0 };
-        //
-        //     if visual_x < left_bound {
-        //         self.col_offset = visual_x.saturating_sub(available_width / 2);
-        //     } else if visual_x >= self.col_offset + available_width.saturating_sub(1) {
-        //         self.col_offset = visual_x.saturating_sub(available_width / 2);
-        //     }
-        // }
         } else {
-            // -- Reverted back to exact original vertical line-by-line scrolling --
+            // --- Vertical Scrolling ---
             if self.cursor_y < self.row_offset {
                 self.row_offset = self.cursor_y;
-            }
-            if self.cursor_y >= self.row_offset + visible_rows {
-                self.row_offset = self.cursor_y - visible_rows + 1;
+            } else if self.cursor_y >= self.row_offset + visible_rows {
+                // Using saturating_sub ensures we don't underflow if visible_rows is 0
+                self.row_offset = self.cursor_y.saturating_sub(visible_rows - 1);
             }
 
+            // --- Horizontal Scrolling (1/2 Page at a time) ---
             let visual_x = self.get_visual_cursor_x();
-            let left_bound = if self.col_offset > 0 { self.col_offset + 1 } else { 0 };
+            let right_bound = self.col_offset + available_width;
 
-            // -- Fixed horizontal scrolling to move smoothly by 1 character --
-            if visual_x < left_bound {
-                // Smoothly slide left
-                self.col_offset = visual_x.saturating_sub(1);
-            } else if visual_x >= self.col_offset + available_width.saturating_sub(1) {
-                // Smoothly slide right
-                self.col_offset = visual_x.saturating_sub(available_width.saturating_sub(2));
+            if visual_x < self.col_offset {
+                // Cursor moved off the left edge, jump left by half a screen
+                self.col_offset = visual_x.saturating_sub(available_width / 2);
+            } else if visual_x >= right_bound {
+                // Cursor moved off the right edge, jump right by half a screen
+                self.col_offset = visual_x.saturating_sub(available_width / 2);
             }
         }
-        
         Ok(())
     }
 
