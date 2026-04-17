@@ -170,7 +170,7 @@ impl SpellExt for Editor {
         }
         None
     }
-    
+
     fn spell_check(&mut self) -> io::Result<()> {
         if self.dictionary.is_none() {
             self.dictionary = Some(Self::load_dictionary());
