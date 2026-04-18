@@ -59,7 +59,7 @@ impl ConfigExt for Editor {
 
     fn load_config() -> (String, bool, bool) {
         let mut theme = String::from("base16-ocean.dark");
-        let mut line_numbers = true;
+        let mut line_numbers = false;
         let mut soft_wrap = false;
 
         if let Some(path) = Self::get_config_path() {
