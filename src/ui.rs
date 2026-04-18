@@ -508,6 +508,9 @@ impl UiExt for Editor {
             stdout.flush()?;
 
             if let Event::Key(key) = event::read()? {
+                if key.kind != event::KeyEventKind::Press {
+                    continue;
+                }
                 match key.code {
                     KeyCode::Enter => {
                         self.clear_status();
@@ -563,6 +566,9 @@ impl UiExt for Editor {
             stdout.flush()?;
 
             if let Event::Key(key) = event::read()? {
+                if key.kind != event::KeyEventKind::Press {
+                    continue;
+                }
                 match key.code {
                     KeyCode::Char('y') | KeyCode::Char('Y') => {
                         self.clear_status();
@@ -608,6 +614,9 @@ impl UiExt for Editor {
             stdout.flush()?;
 
             if let Event::Key(key) = event::read()? {
+                if key.kind != event::KeyEventKind::Press {
+                    continue;
+                }
                 match key.code {
                     KeyCode::Char('y') | KeyCode::Char('Y') => {
                         self.clear_status();
@@ -772,6 +781,9 @@ impl UiExt for Editor {
                 stdout.flush()?;
 
                 if let Event::Key(key) = event::read()? {
+                    if key.kind != event::KeyEventKind::Press {
+                        continue;
+                    }
                     match key.code {
                         KeyCode::Esc => return Ok(None),
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(None),
