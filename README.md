@@ -59,6 +59,7 @@ cargo install xnano
 ### Tools:
     Ctrl+C, F11      Current Position
     Ctrl+T, F12      To Spell (Spell check)
+                     Does NOT work on Windows
     Ctrl+L           Go to line number
     Meta+T           Cycle Syntax Theme
     Meta+L           Toggle Line Numbers
