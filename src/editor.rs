@@ -225,23 +225,28 @@ impl Editor {
 
         if self.soft_wrap {
             self.col_offset = 0;
+
             if self.cursor_y < self.row_offset {
                 self.row_offset = self.cursor_y;
-            }
+            } else {
+                let mut screen_rows_used = self.get_visual_cursor_x() / available_width;
+                let mut required_row_offset = self.cursor_y;
 
-            loop {
-                let mut screen_y_offset = 0;
-                for i in self.row_offset..self.cursor_y {
-                    let w = self.get_visual_line_width(i);
-                    screen_y_offset += if w == 0 { 1 } else { (w - 1) / available_width + 1 };
+                while required_row_offset > 0 {
+                    let prev_line = required_row_offset - 1;
+                    let w = self.get_visual_line_width(prev_line);
+                    let line_rows = if w == 0 { 1 } else { (w - 1) / available_width + 1 };
+
+                    if screen_rows_used + line_rows >= visible_rows {
+                        break;
+                    }
+
+                    screen_rows_used += line_rows;
+                    required_row_offset -= 1;
                 }
-                let cursor_visual = self.get_visual_cursor_x();
-                screen_y_offset += cursor_visual / available_width;
 
-                if screen_y_offset >= visible_rows && self.row_offset < self.cursor_y {
-                    self.row_offset += 1;
-                } else {
-                    break;
+                if self.row_offset < required_row_offset {
+                    self.row_offset = required_row_offset;
                 }
             }
         } else {

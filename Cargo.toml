@@ -1,11 +1,11 @@
 [package]
 name = "xnano"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 license = "MIT"
-keywords = ["text-editor", "nano", "tui", "syntax-highlighting"]
+keywords = ["text-editor", "nano", "tui", "syntax"]
 categories = ["text-editors"]
-description = "Text editor (inspired by nano) with extra features such as syntax highlighting, themes, etc. Written in Rust. Tested with MacOS, Linux."
+description = "Text editor (inspired by nano) with syntax highlighting, themes, soft line-wrap, etc. Written in Rust. Tested with MacOS, Linux."
 readme = true
 documentation = "https://docs.rs/xnano"
 repository = "https://github.com/mabognar/xnano"
