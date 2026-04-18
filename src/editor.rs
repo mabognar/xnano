@@ -230,8 +230,8 @@ impl Editor {
             if self.cursor_y < self.row_offset {
                 self.row_offset = self.cursor_y;
             } else if self.cursor_y >= self.row_offset + visible_rows {
-                // Using saturating_sub ensures we don't underflow if visible_rows is 0
-                self.row_offset = self.cursor_y.saturating_sub(visible_rows - 1);
+                // self.row_offset = self.cursor_y.saturating_sub(visible_rows - 1);
+                self.row_offset = self.cursor_y.saturating_sub(visible_rows.saturating_sub(1));
             }
 
             // --- Horizontal Scrolling (1/2 Page at a time) ---
