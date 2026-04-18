@@ -59,7 +59,7 @@ impl Editor {
         let buffer = if let Some(ref fname) = filename {
             let expanded = Self::expand_tilde(fname);
             if let Ok(file) = File::open(&expanded) {
-                Rope::from_reader(std::io::BufReader::new(file)).unwrap_or_default()
+                Rope::from_reader(io::BufReader::new(file)).unwrap_or_default()
             } else {
                 Rope::new()
             }
@@ -168,7 +168,7 @@ impl Editor {
 
     pub fn run(&mut self) -> io::Result<()> {
         terminal::enable_raw_mode()?;
-        let mut stdout = std::io::stdout();
+        let mut stdout = io::stdout();
         execute!(stdout, terminal::EnterAlternateScreen)?;
 
         // --- NEW: Set initial cursor color ---
@@ -209,7 +209,7 @@ impl Editor {
 
         // Reset cursor color on exit
         print!("\x1b]112\x07");
-        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let _ = io::Write::flush(&mut io::stdout());
 
         Ok(())
     }

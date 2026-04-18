@@ -97,11 +97,11 @@ impl UiExt for Editor {
                 let path = std::path::Path::new(name);
                 if path.is_absolute() {
                     name.to_string()
-                } else if let Ok(cwd) = std::env::current_dir() {
+                } else if let Ok(cwd) = env::current_dir() {
                     let full_path = cwd.join(path);
                     // Canonicalize resolves '..' and symlinks if the file exists on disk.
                     // If the file is new and doesn't exist yet, fallback to the basic joined path.
-                    std::fs::canonicalize(&full_path)
+                    fs::canonicalize(&full_path)
                         .unwrap_or(full_path)
                         .to_string_lossy()
                         .into_owned()
@@ -328,7 +328,7 @@ impl UiExt for Editor {
                     if needs_right_dollar {
                         if last_bg != Some(dollar_bg) { queue!(stdout, SetBackgroundColor(dollar_bg))?; last_bg = Some(dollar_bg); }
                         if last_fg != Some(dollar_fg) { queue!(stdout, SetForegroundColor(dollar_fg))?; last_fg = Some(dollar_fg); }
-                        queue!(stdout, cursor::MoveTo((cols - 1) as u16, (terminal_y + 1) as u16), Print('$'))?;
+                        queue!(stdout, cursor::MoveTo(cols - 1, (terminal_y + 1) as u16), Print('$'))?;
                     }
                 }
 
