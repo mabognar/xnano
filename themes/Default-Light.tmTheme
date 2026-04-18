@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>name</key>
+    <string>Pure Light</string>
+    <key>settings</key>
+    <array>
+        <dict>
+            <key>settings</key>
+            <dict>
+                <key>background</key>
+                <string>#FFFFFF</string>
+                <key>foreground</key>
+                <string>#000000</string>
+                <key>caret</key>
+                <string>#000000</string>
+                <key>lineHighlight</key>
+                <string>#F2F2F2</string>
+                <key>selection</key>
+                <string>#E0E0E0</string>
+                <key>invisibles</key>
+                <string>#BFBFBF</string>
+            </dict>
+        </dict>
+        <dict>
+            <key>name</key>
+            <string>Comment</string>
+            <key>scope</key>
+            <string>comment</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>#757575</string>
+                <key>fontStyle</key>
+                <string>italic</string>
+            </dict>
+        </dict>
+        <dict>
+            <key>name</key>
+            <string>Keyword / String</string>
+            <key>scope</key>
+            <string>keyword, string, constant</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>#000000</string>
+                <key>fontStyle</key>
+                <string>bold</string>
+            </dict>
+        </dict>
+    </array>
+    <key>uuid</key>
+    <string>E2A32B60-223F-11ED-A1EB-0242AC120002</string>
+</dict>
+</plist>

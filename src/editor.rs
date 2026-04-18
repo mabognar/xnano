@@ -345,7 +345,7 @@ impl Editor {
 
         Ok(())
     }
-    
+
     pub(crate) fn get_cursor_char_idx(&self) -> usize {
         self.buffer.line_to_char(self.cursor_y) + self.cursor_x
     }
