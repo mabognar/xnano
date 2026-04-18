@@ -15,7 +15,8 @@ use std::fs;
 use std::path::PathBuf;
 
 pub trait UiExt {
-    fn draw_menu_line(writer: &mut io::Stdout, row: u16, cols: u16, col_width: usize, items: &[(&str, &str)], ui_bg: Color, key_fg: Color, text_fg: Color) -> io::Result<()>;
+    fn draw_menu_line(writer: &mut io::Stdout, row: u16, cols: u16, col_width: usize,
+                      items: &[(&str, &str)], ui_bg: Color, key_fg: Color, text_fg: Color) -> io::Result<()>;
     fn draw_screen(&mut self) -> io::Result<()>;
     fn prompt(&mut self, prompt_text: &str, allow_browser: bool) -> io::Result<Option<String>>;
     fn prompt_yn(&mut self, prompt_text: &str) -> io::Result<Option<bool>>;
@@ -81,7 +82,8 @@ impl UiExt for Editor {
         let raw_theme_bg = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
         let ui_bg = Self::derive_ui_color(raw_theme_bg, is_dark);
 
-        let title_fg = if is_dark { Color::Reset } else { Color::Rgb { r: 0, g: 50, b: 150 } };
+        let title_fg = if is_dark { Color::Reset } else { Color::Black };
+        // let title_fg = if is_dark { Color::Reset } else { Color::Rgb { r: 0, g: 50, b: 150 } };
         let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
         let menu_text_fg = if is_dark { Color::Reset } else { Color::Black };
 
