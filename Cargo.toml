@@ -2,6 +2,13 @@
 name = "xnano"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+keywords = ["text-editor", "nano", "tui", "syntax-highlighting"]
+categories = ["text-editors"]
+description = "Text editor (inspired by nano) with extra features such as syntax highlighting, themes, etc. Written entirely in Rust."
+readme = true
+documentation = "https://docs.rs/xnano"
+repository = "https://github.com/mabognar/xnano"
 
 [dependencies]
 crossterm = "0.29.0"
