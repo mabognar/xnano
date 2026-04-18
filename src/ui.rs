@@ -998,6 +998,9 @@ impl UiExt for Editor {
             stdout.flush()?;
 
             if let Event::Key(key) = event::read()? {
+                if key.kind != event::KeyEventKind::Press {
+                    continue;
+                }
                 match key.code {
                     KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                     KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => break,

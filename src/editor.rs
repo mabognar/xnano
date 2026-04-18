@@ -224,7 +224,26 @@ impl Editor {
         let available_width = std::cmp::max(1, cols_u.saturating_sub(gutter_width));
 
         if self.soft_wrap {
-            // ... [Keep your existing soft wrap logic here] ...
+            self.col_offset = 0;
+            if self.cursor_y < self.row_offset {
+                self.row_offset = self.cursor_y;
+            }
+
+            loop {
+                let mut screen_y_offset = 0;
+                for i in self.row_offset..self.cursor_y {
+                    let w = self.get_visual_line_width(i);
+                    screen_y_offset += if w == 0 { 1 } else { (w - 1) / available_width + 1 };
+                }
+                let cursor_visual = self.get_visual_cursor_x();
+                screen_y_offset += cursor_visual / available_width;
+
+                if screen_y_offset >= visible_rows && self.row_offset < self.cursor_y {
+                    self.row_offset += 1;
+                } else {
+                    break;
+                }
+            }
         } else {
             // --- Vertical Scrolling ---
             if self.cursor_y < self.row_offset {
