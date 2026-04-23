@@ -52,6 +52,7 @@ pub struct Editor {
     pub(crate) pre_justify_snapshot: Option<(Rope, usize, usize)>,
     pub(crate) show_line_numbers: bool,
     pub(crate) soft_wrap: bool,
+    pub(crate) previous_action_was_cut: bool,
 }
 
 impl Editor {
@@ -129,6 +130,7 @@ impl Editor {
             pre_justify_snapshot: None,
             show_line_numbers: line_numbers,
             soft_wrap,
+            previous_action_was_cut: false,
         }
     }
 
@@ -411,6 +413,7 @@ impl Editor {
 
             let was_justified = self.is_justified;
             let mut keep_justified = false;
+            let mut current_action_is_cut = false;
 
             match key.code {
                 KeyCode::Char('^') if is_ctrl => self.toggle_mark(),
@@ -435,8 +438,14 @@ impl Editor {
                 KeyCode::Char('\\') if is_ctrl => self.replace()?,
                 KeyCode::Char('4') if is_ctrl => self.replace()?,
 
-                KeyCode::Char('k') if is_ctrl => self.cut_line(),
-                KeyCode::F(9) => self.cut_line(),
+                KeyCode::Char('k') if is_ctrl => {
+                    self.cut_line();
+                    current_action_is_cut = true;
+                }
+                KeyCode::F(9) => {
+                    self.cut_line();
+                    current_action_is_cut = true;
+                }
 
                 KeyCode::Char('u') if is_ctrl => {
                     if was_justified { self.unjustify(); } else { self.paste_line(); }
@@ -532,6 +541,7 @@ impl Editor {
             if !keep_justified {
                 self.is_justified = false;
             }
+            self.previous_action_was_cut = current_action_is_cut;
         }
 
         self.scroll()?;
@@ -801,7 +811,13 @@ impl Editor {
             let end_char = mark_idx.max(cursor_idx);
 
             if start_char != end_char {
-                self.clipboard = self.buffer.slice(start_char..end_char).to_string();
+                let cut_text = self.buffer.slice(start_char..end_char).to_string();
+                if self.previous_action_was_cut {
+                    self.clipboard.push_str(&cut_text);
+                } else {
+                    self.clipboard = cut_text;
+                }
+
                 self.buffer.remove(start_char..end_char);
 
                 self.cursor_y = self.buffer.char_to_line(start_char);
@@ -821,7 +837,13 @@ impl Editor {
                 self.buffer.len_chars()
             };
 
-            self.clipboard = self.buffer.slice(start_char..end_char).to_string();
+            let cut_text = self.buffer.slice(start_char..end_char).to_string();
+            if self.previous_action_was_cut {
+                self.clipboard.push_str(&cut_text);
+            } else {
+                self.clipboard = cut_text;
+            }
+
             self.buffer.remove(start_char..end_char);
 
             self.cursor_x = 0;
