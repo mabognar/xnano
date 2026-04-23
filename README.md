@@ -1,5 +1,5 @@
 # xnano
-xnano is a fast text editor, inspired by nano, written in Rust. Includes syntax highlighting, themes, soft line-wrap, 
+xnano is a fast text editor, inspired by nano, written from the ground-up in Rust. Includes syntax highlighting, themes, soft line-wrap, 
 line numbers, etc. Efficient and easy to use. 30 included themes.
 
 <img width="852" height="700" alt="Screenshot 2026-04-17 at 7 25 04 PM" src="https://github.com/user-attachments/assets/38a472e6-2c7c-46d5-89bb-7d33bb3de7b4" />
