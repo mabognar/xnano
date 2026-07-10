@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 keywords = ["text-editor", "nano", "tui", "syntax"]
 categories = ["text-editors"]
-description = "Text editor (inspired by nano) with syntax highlighting, themes, soft line-wrap, etc. Written from the ground-up in Rust. Tested with MacOS, Linux, Windows, BSD."
+description = "Text editor with syntax highlighting, themes, soft line-wrap, etc. Written from the ground-up in Rust. Tested with MacOS, Linux, Windows, BSD."
 readme = true
 documentation = "https://docs.rs/xnano"
 repository = "https://github.com/mabognar/xnano"
@@ -15,3 +15,6 @@ crossterm = "0.29.0"
 ropey = "1.6.1"
 syntect = "5.3.0"
 include_dir = "0.7.4"
+ureq = { version = "2.9.1", features = ["json"] }
+serde_json = "1.0"
+webbrowser = "0.8"

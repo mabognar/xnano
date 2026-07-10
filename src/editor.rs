@@ -9,6 +9,9 @@ use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use crossterm::{execute, terminal, event::{self, Event, KeyCode, KeyModifiers}};
 
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+
 // Pull in the trait definitions so this file knows about draw_screen, spell_check, etc.
 use crate::config::ConfigExt;
 use crate::spell::SpellExt;
@@ -16,7 +19,9 @@ use crate::ui::UiExt;
 
 #[derive(PartialEq)]
 pub(crate) enum MenuState {
-    Default,
+    Menu1,
+    Menu2,
+    Menu3,
     YesNoCancel,
     ReplaceAction,
     CancelOnly,
@@ -53,6 +58,9 @@ pub struct Editor {
     pub(crate) show_line_numbers: bool,
     pub(crate) soft_wrap: bool,
     pub(crate) previous_action_was_cut: bool,
+    pub(crate) escape_pending: bool, // Added escape tracker for macOS terminal fallback
+    pub(crate) update_rx: Option<Receiver<String>>,
+    pub(crate) update_version: Option<String>,
 }
 
 impl Editor {
@@ -102,6 +110,26 @@ impl Editor {
             starting_theme = String::from("base16-ocean.dark");
         }
 
+        let (update_tx, update_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let current_version = env!("CARGO_PKG_VERSION");
+            // GitHub API requires a User-Agent header
+            if let Ok(resp) = ureq::get("https://api.github.com/repos/mabognar/xnano/releases/latest")
+                .set("User-Agent", "xnano-update-checker")
+                .timeout(Duration::from_secs(3))
+                .call()
+            {
+                if let Ok(json) = resp.into_json::<serde_json::Value>() {
+                    if let Some(tag) = json["tag_name"].as_str() {
+                        let latest_version = tag.trim_start_matches('v');
+                        if latest_version != current_version {
+                            let _ = update_tx.send(latest_version.to_string());
+                        }
+                    }
+                }
+            }
+        });
+
         Self {
             buffer,
             cursor_x: 0,
@@ -122,7 +150,7 @@ impl Editor {
             theme_set,
             is_modified: false,
             last_search: None,
-            menu_state: MenuState::Default,
+            menu_state: MenuState::Menu1,
             highlight_match: None,
             highlight_cache: HashMap::new(),
             current_theme: starting_theme,
@@ -131,6 +159,9 @@ impl Editor {
             show_line_numbers: line_numbers,
             soft_wrap,
             previous_action_was_cut: false,
+            escape_pending: false, // Initialize tracker
+            update_rx: Some(update_rx),
+            update_version: None,
         }
     }
 
@@ -173,12 +204,21 @@ impl Editor {
         let mut stdout = io::stdout();
         execute!(stdout, terminal::EnterAlternateScreen)?;
 
-        // --- NEW: Set initial cursor color ---
         self.update_cursor_color();
 
         loop {
+            // check for update in background
+            if let Some(rx) = &self.update_rx {
+                if let Ok(version) = rx.try_recv() {
+                    self.update_version = Some(version.clone());
+                    self.set_status(format!("Press Meta+U (Alt+U) to update xnano to version {}", version));
+                    self.update_rx = None; // Stop checking
+                }
+            }
+
+            // expire old status messages
             if let Some(time) = self.status_time {
-                if time.elapsed() >= Duration::from_secs(3) {
+                if time.elapsed() >= Duration::from_secs(10) {
                     self.clear_status();
                 }
             }
@@ -188,7 +228,8 @@ impl Editor {
                 break;
             }
 
-            let timeout = if let Some(time) = self.status_time {
+            // calculate how long to sleep before repolling
+            let mut timeout = if let Some(time) = self.status_time {
                 let elapsed = time.elapsed();
                 if elapsed >= Duration::from_secs(3) {
                     Duration::from_millis(1)
@@ -199,10 +240,20 @@ impl Editor {
                 Duration::from_secs(3600)
             };
 
+            // wake every 250ms to check the background thread
+            if self.update_rx.is_some() {
+                timeout = timeout.min(Duration::from_millis(250));
+            }
+
+            // wait for event
             if event::poll(timeout)? {
                 self.process_keypress()?;
             } else {
-                self.clear_status();
+                if let Some(time) = self.status_time {
+                    if time.elapsed() >= Duration::from_secs(3) {
+                        self.clear_status();
+                    }
+                }
             }
         }
 
@@ -256,7 +307,6 @@ impl Editor {
             if self.cursor_y < self.row_offset {
                 self.row_offset = self.cursor_y;
             } else if self.cursor_y >= self.row_offset + visible_rows {
-                // self.row_offset = self.cursor_y.saturating_sub(visible_rows - 1);
                 self.row_offset = self.cursor_y.saturating_sub(visible_rows.saturating_sub(1));
             }
 
@@ -336,7 +386,32 @@ impl Editor {
         self.desired_cursor_x = self.cursor_x;
     }
 
+    pub(crate) fn delete_selection(&mut self) -> bool {
+        if let Some(mark_idx) = self.mark {
+            let cursor_idx = self.get_cursor_char_idx();
+            let start_char = mark_idx.min(cursor_idx);
+            let end_char = mark_idx.max(cursor_idx);
+
+            // Always unmark, whether we delete something or not
+            self.mark = None;
+
+            if start_char != end_char {
+                self.buffer.remove(start_char..end_char);
+                self.cursor_y = self.buffer.char_to_line(start_char);
+                self.cursor_x = start_char - self.buffer.line_to_char(self.cursor_y);
+                self.desired_cursor_x = self.cursor_x;
+                self.mark_modified();
+                return true; // Indicates text was successfully deleted
+            }
+        }
+        false
+    }
+
     pub(crate) fn delete_char(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
+
         let idx = self.get_cursor_char_idx();
         if idx < self.buffer.len_chars() {
             self.buffer.remove(idx..(idx + 1));
@@ -345,6 +420,8 @@ impl Editor {
     }
 
     pub(crate) fn insert_tab(&mut self) {
+        self.delete_selection(); // delete selected text before
+
         let idx = self.get_cursor_char_idx();
         self.buffer.insert(idx, "    ");
         self.cursor_x += 4;
@@ -409,7 +486,16 @@ impl Editor {
             self.highlight_match = None;
 
             let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-            let is_alt = key.modifiers.contains(KeyModifiers::ALT);
+            let mut is_alt = key.modifiers.contains(KeyModifiers::ALT);
+
+            // macos terminal fallback
+            if self.escape_pending {
+                is_alt = true;
+                self.escape_pending = false;
+            } else if key.code == KeyCode::Esc {
+                self.escape_pending = true;
+                return Ok(());
+            }
 
             let was_justified = self.is_justified;
             let mut keep_justified = false;
@@ -420,7 +506,7 @@ impl Editor {
                 KeyCode::Char('6') if is_ctrl => self.toggle_mark(),
                 KeyCode::Char('a') if is_alt => self.toggle_mark(),
 
-                KeyCode::Char('g') if is_ctrl => self.show_help()?,
+                KeyCode::Char('h') if is_ctrl => self.show_help()?,
                 KeyCode::F(1) => self.show_help()?,
 
                 KeyCode::Char('x') if is_ctrl => self.exit_editor()?,
@@ -487,11 +573,30 @@ impl Editor {
                     self.set_status(if self.soft_wrap { "Soft wrap enabled".into() } else { "Soft wrap disabled".into() });
                 }
 
+                KeyCode::Char('o') if is_alt => {
+                    self.menu_state = match self.menu_state {
+                        MenuState::Menu1 => MenuState::Menu2,
+                        MenuState::Menu2 => MenuState::Menu3,
+                        _ => MenuState::Menu1, // Loop back to page 1
+                    };
+                }
+                KeyCode::Char('u') if is_alt => {
+                    if self.update_version.take().is_some() {
+                        let _ = webbrowser::open("https://github.com/mabognar/xnano/releases/latest");
+                        self.set_status(String::from("Opened browser to download update."));
+                    } else {
+                        // Optional: Give feedback if they press it when no update is available
+                        self.set_status(String::from("No update pending."));
+                    }
+                }
+
                 KeyCode::Char('y') if is_ctrl => self.page_up()?,
                 KeyCode::F(7) | KeyCode::PageUp => self.page_up()?,
+                KeyCode::Char('p') if is_alt => self.page_up()?,
 
                 KeyCode::Char('v') if is_ctrl => self.page_down()?,
                 KeyCode::F(8) | KeyCode::PageDown => self.page_down()?,
+                KeyCode::Char('n') if is_alt => self.page_down()?,
 
                 KeyCode::Char('b') if is_ctrl => self.move_left(),
                 KeyCode::Char('f') if is_ctrl => self.move_right(),
@@ -506,12 +611,20 @@ impl Editor {
                 KeyCode::Char('i') if is_ctrl => self.insert_tab(),
                 KeyCode::Tab => self.insert_tab(),
 
+                KeyCode::Left if is_ctrl => self.move_word_left(),
+                KeyCode::Right if is_ctrl => self.move_word_right(),
+                KeyCode::Left if is_alt => self.move_word_left(),
+                KeyCode::Right if is_alt => self.move_word_right(),
+                KeyCode::Char('b') if is_alt => self.move_word_left(), // macOS Esc b
+                KeyCode::Char('f') if is_alt => self.move_word_right(), // macOS Esc f
+
                 KeyCode::Up => self.move_up(),
                 KeyCode::Down => self.move_down(),
                 KeyCode::Left => self.move_left(),
                 KeyCode::Right => self.move_right(),
 
                 KeyCode::Char(c) if !is_ctrl && !is_alt => {
+                    self.delete_selection();
                     let idx = self.get_cursor_char_idx();
                     self.buffer.insert_char(idx, c);
                     self.cursor_x += 1;
@@ -519,6 +632,7 @@ impl Editor {
                     self.mark_modified();
                 }
                 KeyCode::Enter => {
+                    self.delete_selection();
                     let idx = self.get_cursor_char_idx();
                     self.buffer.insert_char(idx, '\n');
                     self.cursor_y += 1;
@@ -527,13 +641,15 @@ impl Editor {
                     self.mark_modified();
                 }
                 KeyCode::Backspace => {
-                    let idx = self.get_cursor_char_idx();
-                    if idx > 0 {
-                        self.buffer.remove((idx - 1)..idx);
-                        self.cursor_y = self.buffer.char_to_line(idx - 1);
-                        self.cursor_x = (idx - 1) - self.buffer.line_to_char(self.cursor_y);
-                        self.desired_cursor_x = self.cursor_x;
-                        self.mark_modified();
+                    if !self.delete_selection() {
+                        let idx = self.get_cursor_char_idx();
+                        if idx > 0 {
+                            self.buffer.remove((idx - 1)..idx);
+                            self.cursor_y = self.buffer.char_to_line(idx - 1);
+                            self.cursor_x = (idx - 1) - self.buffer.line_to_char(self.cursor_y);
+                            self.desired_cursor_x = self.cursor_x;
+                            self.mark_modified();
+                        }
                     }
                 }
                 _ => { self.clear_status(); }
@@ -734,16 +850,20 @@ impl Editor {
         }
 
         let mut end_line = self.cursor_y;
-        while end_line < max_y && self.buffer.line(end_line).chars().any(|c| !c.is_whitespace()) {
+        // Fix 1: Use <= max_y so the very last line of the file can be evaluated
+        while end_line <= max_y && self.buffer.line(end_line).chars().any(|c| !c.is_whitespace()) {
             end_line += 1;
         }
+
         if start_line == end_line && !self.buffer.line(start_line).chars().any(|c| !c.is_whitespace()) {
             return;
         }
 
         let start_char = self.buffer.line_to_char(start_line);
-        let end_char = if end_line + 1 < self.buffer.len_lines() {
-            self.buffer.line_to_char(end_line + 1)
+        // Fix 2: Do not add + 1 to end_line. This stops the removal range exactly AT
+        // the start of the blank line, leaving the blank line perfectly intact.
+        let end_char = if end_line < self.buffer.len_lines() {
+            self.buffer.line_to_char(end_line)
         } else {
             self.buffer.len_chars()
         };
@@ -769,6 +889,7 @@ impl Editor {
                 current_line_len += word.len();
             }
         }
+        // This newline will correctly bridge the gap to the preserved blank line
         new_text.push('\n');
 
         self.buffer.remove(start_char..end_char);
@@ -860,6 +981,8 @@ impl Editor {
     pub(crate) fn paste_line(&mut self) {
         if self.clipboard.is_empty() { return; }
 
+        self.delete_selection();
+
         let current_char = self.get_cursor_char_idx();
         self.buffer.insert(current_char, &self.clipboard);
 
@@ -905,9 +1028,9 @@ impl Editor {
     pub(crate) fn save_file(&mut self) -> io::Result<()> {
         let default_name = self.filename.clone().unwrap_or_default();
         let prompt_text = if default_name.is_empty() {
-            String::from("File Name to Write: ")
+            String::from("File name to write: ")
         } else {
-            format!("File Name to Write [{}]: ", default_name)
+            format!("File name to write [{}]: ", default_name)
         };
 
         if let Some(mut new_name) = self.prompt(&prompt_text, true)? {
@@ -954,4 +1077,58 @@ impl Editor {
         }
         Ok(())
     }
+
+    pub(crate) fn move_word_right(&mut self) {
+        let mut idx = self.get_cursor_char_idx();
+        let len = self.buffer.len_chars();
+        if idx >= len { return; }
+
+        let start_is_word = self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_';
+
+        // 1. If we are on a word, skip the rest of the word characters
+        if start_is_word {
+            while idx < len && (self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
+                idx += 1;
+            }
+        }
+
+        // 2. Skip any spaces, punctuation, or newlines until the start of the next word
+        while idx < len && !(self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
+            idx += 1;
+        }
+
+        // Update cursor coordinates
+        self.cursor_y = self.buffer.char_to_line(idx);
+        self.cursor_x = idx - self.buffer.line_to_char(self.cursor_y);
+        self.desired_cursor_x = self.cursor_x;
+    }
+
+    pub(crate) fn move_word_left(&mut self) {
+        let mut idx = self.get_cursor_char_idx();
+        if idx == 0 { return; }
+
+        idx -= 1; // Step back one character to begin evaluating
+
+        // 1. Skip backwards through any spaces, punctuation, or newlines
+        while idx > 0 && !(self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
+            idx -= 1;
+        }
+
+        // 2. Skip backwards through the word characters to find the start of the word
+        while idx > 0 && (self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
+            idx -= 1;
+        }
+
+        // If we didn't hit the absolute beginning of the file, step forward one
+        // to land on the first letter of the word.
+        if idx > 0 || !(self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
+            idx += 1;
+        }
+
+        // Update cursor coordinates
+        self.cursor_y = self.buffer.char_to_line(idx);
+        self.cursor_x = idx - self.buffer.line_to_char(self.cursor_y);
+        self.desired_cursor_x = self.cursor_x;
+    }
 }
+

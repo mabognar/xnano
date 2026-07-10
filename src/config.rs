@@ -8,6 +8,16 @@ use include_dir::{include_dir, Dir};
 
 static BUNDLED_THEMES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/themes");
 
+#[derive(Clone, Copy)]
+pub struct UiColors {
+    pub bg: Color,
+    pub fg: Color,
+    pub menu_bg: Color,
+    pub selected_bg: Color,
+    pub accent: Color,
+    pub is_dark: bool,
+}
+
 pub trait ConfigExt {
     fn get_base_dir() -> Option<PathBuf>;
     fn initialize_themes() -> std::io::Result<()>;
@@ -16,9 +26,10 @@ pub trait ConfigExt {
     fn load_config() -> (String, bool, bool);
     fn save_config(&self);
     fn is_dark_theme(theme: &Theme) -> bool;
-    fn derive_ui_color(bg: syntect::highlighting::Color, is_dark: bool) -> Color;
+    // fn derive_ui_color(bg: syntect::highlighting::Color, is_dark: bool) -> Color;
     fn cycle_theme(&mut self);
     fn update_cursor_color(&self);
+    fn derive_ui_colors(theme: &Theme) -> UiColors;
 }
 
 impl ConfigExt for Editor {
@@ -96,12 +107,71 @@ impl ConfigExt for Editor {
         luminance < 128.0
     }
 
-    fn derive_ui_color(bg: syntect::highlighting::Color, is_dark: bool) -> Color {
-        let offset: i16 = if is_dark { 20 } else { -20 };
-        let r = (bg.r as i16 + offset).clamp(0, 255) as u8;
-        let g = (bg.g as i16 + offset).clamp(0, 255) as u8;
-        let b = (bg.b as i16 + offset).clamp(0, 255) as u8;
-        Color::Rgb { r, g, b }
+    fn derive_ui_colors(theme: &Theme) -> UiColors {
+        let raw_bg = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
+        let raw_fg = theme.settings.foreground.unwrap_or(syntect::highlighting::Color { r: 255, g: 255, b: 255, a: 255 });
+
+        let bg = Color::Rgb { r: raw_bg.r, g: raw_bg.g, b: raw_bg.b };
+        let fg = Color::Rgb { r: raw_fg.r, g: raw_fg.g, b: raw_fg.b };
+
+        // Exact logic from xpine to determine luminance
+        let is_dark = (raw_bg.r as u32 + raw_bg.g as u32 + raw_bg.b as u32) < 384;
+
+        let ui_bg = if is_dark {
+            Color::Rgb { r: raw_bg.r.saturating_add(20), g: raw_bg.g.saturating_add(20), b: raw_bg.b.saturating_add(20) }
+        } else {
+            Color::Rgb { r: raw_bg.r.saturating_sub(20), g: raw_bg.g.saturating_sub(20), b: raw_bg.b.saturating_sub(20) }
+        };
+
+        let selected_bg = if raw_bg.r < 128 {
+            Color::Rgb { r: raw_bg.r.saturating_add(40), g: raw_bg.g.saturating_add(40), b: raw_bg.b.saturating_add(40) }
+        } else {
+            Color::Rgb { r: raw_bg.r.saturating_sub(40), g: raw_bg.g.saturating_sub(40), b: raw_bg.b.saturating_sub(40) }
+        };
+
+        let get_theme_color = |keys: &[&str]| -> Option<Color> {
+            for item in &theme.scopes {
+                let scope_str = format!("{:?}", item.scope).to_lowercase();
+                for key in keys {
+                    if scope_str.contains(key) {
+                        if let Some(c) = item.style.foreground {
+                            return Some(Color::Rgb { r: c.r, g: c.g, b: c.b });
+                        }
+                    }
+                }
+            }
+            None
+        };
+
+        // Extracts the dynamic accent color from the active .tmTheme
+        let mut accent = get_theme_color(&["entity.name.function", "variable"])
+            .unwrap_or(if is_dark { Color::Rgb { r: 100, g: 200, b: 255 } } else { Color::Rgb { r: 20, g: 100, b: 180 } });
+
+        // Ensure high contrast for menu hot-keys in specific algorithm-based themes
+        if let Some(name) = &theme.name {
+            let lower_name = name.to_lowercase();
+
+            if lower_name.contains("catppuccin") {
+                accent = if is_dark {
+                    // Catppuccin Yellow for dark variants (Mocha, Macchiato, Frappe)
+                    Color::Rgb { r: 249, g: 226, b: 175 }
+                } else {
+                    // Catppuccin Yellow for the light variant (Latte)
+                    Color::Rgb { r: 223, g: 142, b: 29 }
+                };
+            } else if lower_name.contains("base16") {
+                accent = if is_dark {
+                    // Bright Golden-Yellow for dark base16 themes
+                    Color::Rgb { r: 250, g: 188, b: 45 }
+                } else {
+                    // Bold Rust-Red for light base16 themes
+                    Color::Rgb { r: 200, g: 60, b: 20 }
+                };
+            }
+        }
+
+        UiColors { bg, fg, menu_bg: ui_bg, selected_bg, accent, is_dark }
+
     }
 
     fn cycle_theme(&mut self) {

@@ -106,7 +106,7 @@ impl SpellExt for Editor {
 
             let choice_result = self.prompt("Replace with: ", false)?;
 
-            self.menu_state = MenuState::Default;
+            self.menu_state = MenuState::Menu1;
             let current_suggs_copy = self.current_suggestions.clone();
             self.current_suggestions.clear();
 
