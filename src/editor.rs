@@ -586,7 +586,7 @@ impl Editor {
                         self.set_status(String::from("Opened browser to download update."));
                     } else {
                         // Optional: Give feedback if they press it when no update is available
-                        self.set_status(String::from("No update pending."));
+                        self.set_status(String::from("xnano is the latest version"));
                     }
                 }
 

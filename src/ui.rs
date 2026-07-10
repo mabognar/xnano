@@ -79,20 +79,6 @@ impl UiExt for Editor {
         let visible_rows = rows.saturating_sub(3) as usize;
 
         let theme = &self.theme_set.themes[&self.current_theme];
-        let is_dark = Self::is_dark_theme(theme);
-
-        // let raw_theme_bg = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
-        // let ui_bg = Self::derive_ui_color(raw_theme_bg, is_dark);
-        //
-        // let title_fg = if is_dark { Color::Reset } else { Color::Black };
-        // // let title_fg = if is_dark { Color::Reset } else { Color::Rgb { r: 0, g: 50, b: 150 } };
-        // let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
-        // let menu_text_fg = if is_dark { Color::Reset } else { Color::Black };
-        //
-        // let dollar_bg = if is_dark { Color::Rgb { r: 180, g: 180, b: 180 } } else { Color::Rgb { r: 80, g: 80, b: 80 } };
-        // let dollar_fg = if is_dark { Color::Black } else { Color::White };
-
-        let theme = &self.theme_set.themes[&self.current_theme];
         let colors = Self::derive_ui_colors(theme);
 
         let ui_bg = colors.menu_bg;
@@ -108,8 +94,6 @@ impl UiExt for Editor {
 
         queue!(stdout, cursor::MoveTo(0, 0), SetBackgroundColor(ui_bg))?;
 
-        // let title = "xnano - ";
-
         let file_display_string = match self.filename.as_deref() {
             Some(name) => {
                 let path = std::path::Path::new(name);
@@ -117,8 +101,6 @@ impl UiExt for Editor {
                     name.to_string()
                 } else if let Ok(cwd) = env::current_dir() {
                     let full_path = cwd.join(path);
-                    // Canonicalize resolves '..' and symlinks if the file exists on disk.
-                    // If the file is new and doesn't exist yet, fallback to the basic joined path.
                     fs::canonicalize(&full_path)
                         .unwrap_or(full_path)
                         .to_string_lossy()
@@ -130,14 +112,13 @@ impl UiExt for Editor {
             None => String::from("New Buffer"),
         };
 
-        // Format the spacing and the filename independently
         let file_section = format!("{}", file_display_string);
 
         let right_indicator_len = if self.is_modified { "[ Modified ]".len() } else { 0 };
         let max_allowable_len = (cols as usize).saturating_sub(right_indicator_len);
         let full_len = title.chars().count() + file_section.chars().count();
 
-        // Safeguard: Truncate only the file path side if it overflows
+        // truncate only the file path overflows
         let mut final_file_section = file_section.clone();
         if full_len > max_allowable_len {
             let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count());
@@ -151,9 +132,6 @@ impl UiExt for Editor {
 
         let printed_left_len = title.chars().count() + final_file_section.chars().count();
 
-        // Determine if we should color the file string as the accent color (for "New Buffer")
-        let file_fg = if self.filename.is_none() { menu_key_fg } else { title_fg };
-
         if self.is_modified {
             let right = "[ Modified ]";
             let pad2_len = (cols as usize).saturating_sub(printed_left_len + right.len());
@@ -161,12 +139,12 @@ impl UiExt for Editor {
 
             queue!(
                 stdout,
-                SetForegroundColor(menu_key_fg), // Color "xnano"
+                SetForegroundColor(menu_key_fg),
                 Print(&title),
-                SetForegroundColor(menu_key_fg),     // Color filename or "New Buffer"
+                SetForegroundColor(menu_key_fg),
                 Print(&final_file_section),
                 Print(pad2),
-                SetForegroundColor(menu_key_fg), // Color "[ Modified ]"
+                SetForegroundColor(menu_key_fg),
                 Print(right),
                 SetForegroundColor(Color::Reset),
                 SetBackgroundColor(Color::Reset)
@@ -176,47 +154,15 @@ impl UiExt for Editor {
             let pad2 = " ".repeat(pad2_len);
             queue!(
                 stdout,
-                SetForegroundColor(menu_key_fg), // Color "xnano"
+                SetForegroundColor(menu_key_fg),
                 Print(&title),
-                SetForegroundColor(menu_key_fg),     // Color filename or "New Buffer"
+                SetForegroundColor(menu_key_fg),
                 Print(&final_file_section),
                 Print(pad2),
                 SetForegroundColor(Color::Reset),
                 SetBackgroundColor(Color::Reset)
             )?;
         }
-
-        // if self.is_modified {
-        //     let right = "[ Modified ]   ";
-        //     let pad2_len = (cols as usize).saturating_sub(printed_left_len + right.len());
-        //     let pad2 = " ".repeat(pad2_len);
-        //
-        //     queue!(
-        //         stdout,
-        //         SetForegroundColor(menu_key_fg), // Color "xnano"
-        //         Print(title),
-        //         SetForegroundColor(title_fg),    // Color filename
-        //         Print(&final_file_section),
-        //         Print(pad2),
-        //         SetForegroundColor(title_fg),
-        //         Print(right),
-        //         SetForegroundColor(Color::Reset),
-        //         SetBackgroundColor(Color::Reset)
-        //     )?;
-        // } else {
-        //     let pad2_len = (cols as usize).saturating_sub(printed_left_len);
-        //     let pad2 = " ".repeat(pad2_len);
-        //     queue!(
-        //         stdout,
-        //         SetForegroundColor(menu_key_fg), // Color "xnano"
-        //         Print(title),
-        //         SetForegroundColor(title_fg),    // Color filename
-        //         Print(&final_file_section),
-        //         Print(pad2),
-        //         SetForegroundColor(Color::Reset),
-        //         SetBackgroundColor(Color::Reset)
-        //     )?;
-        // }
 
         let syntax = if let Some(ref name) = self.filename {
             let path = std::path::Path::new(name);
@@ -229,21 +175,17 @@ impl UiExt for Editor {
             self.syntax_set.find_syntax_plain_text()
         };
 
-        let theme_bg_raw = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
         let default_cross_bg = colors.bg;
-        // let default_cross_bg = Color::Rgb { r: theme_bg_raw.r, g: theme_bg_raw.g, b: theme_bg_raw.b };
 
         let max_line_num_len = self.buffer.len_lines().to_string().len();
         let gutter_width = if self.show_line_numbers { max_line_num_len + 1 } else { 0 };
         let available_width = (cols as usize).saturating_sub(gutter_width).saturating_sub(1);
-        // let available_width = std::cmp::max(1, (cols as usize).saturating_sub(gutter_width));
 
         let cursor_absolute = self.get_cursor_char_idx();
         let mark_range = self.mark.map(|m| {
             if m < cursor_absolute { (m, cursor_absolute) } else { (cursor_absolute, m) }
         });
 
-        // --- FIX 1: ANSI state tracking and Hoisted Parser ---
         let mut last_fg: Option<Color> = None;
         let mut last_bg: Option<Color> = None;
         let mut fallback_highlighter = None;
@@ -253,8 +195,7 @@ impl UiExt for Editor {
 
         while terminal_y < visible_rows {
             if file_y < self.buffer.len_lines() {
-                // Instantiating HighlightLines is expensive. We only do it ONCE per frame
-                // and reuse it for any uncached lines we encounter.
+                // instantiating highlightLines once per frame and reuse
                 if !self.highlight_cache.contains_key(&file_y) {
                     if fallback_highlighter.is_none() {
                         fallback_highlighter = Some(HighlightLines::new(syntax, theme));
@@ -288,7 +229,6 @@ impl UiExt for Editor {
                     let syn_bg = style.background;
                     let cross_bg = Color::Rgb { r: syn_bg.r, g: syn_bg.g, b: syn_bg.b };
 
-                    // --- FIX 2: Only issue ANSI codes if the color actually changes ---
                     if last_fg != Some(cross_color) {
                         queue!(stdout, SetForegroundColor(cross_color))?;
                         last_fg = Some(cross_color);
@@ -304,7 +244,6 @@ impl UiExt for Editor {
                             continue;
                         }
 
-                        // --- NEW: Skip rendering leading spaces on wrapped lines ---
                         let is_wrap_space = self.soft_wrap
                             && (printed_on_current_line == 0 || printed_on_current_line >= available_width)
                             && line_char_idx > 0
@@ -315,7 +254,6 @@ impl UiExt for Editor {
                             continue;
                         }
 
-                        // --- WORD WRAP LOOKAHEAD LOGIC ---
                         if self.soft_wrap && printed_on_current_line > 0 && printed_on_current_line < available_width {
                             let is_start_of_word = line_char_idx > 0
                                 && line_chars.get(line_char_idx - 1).map_or(false, |c| c.is_whitespace())
@@ -330,12 +268,10 @@ impl UiExt for Editor {
                                 }
 
                                 if printed_on_current_line + word_width > available_width {
-                                    // Max out the counter to force the renderer to break to a new line
                                     printed_on_current_line = available_width;
                                 }
                             }
                         }
-                        // ---------------------------
 
                         let absolute_char_idx = self.buffer.line_to_char(file_y) + line_char_idx;
 
@@ -363,7 +299,7 @@ impl UiExt for Editor {
                                     if self.show_line_numbers {
                                         queue!(stdout, Print(" ".repeat(gutter_width)))?;
                                     }
-                                    // Re-apply styles after clearing the line
+                                    // re-apply styles after clearing line
                                     if last_fg != Some(cross_color) { queue!(stdout, SetForegroundColor(cross_color))?; last_fg = Some(cross_color); }
                                     if last_bg != Some(cross_bg) { queue!(stdout, SetBackgroundColor(cross_bg))?; last_bg = Some(cross_bg); }
                                     printed_on_current_line = 0;
@@ -421,7 +357,7 @@ impl UiExt for Editor {
                     }
                 }
 
-                // Reset before moving to the next line
+                // reset before moving to the next line
                 if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
                 if last_fg != Some(Color::Reset) { queue!(stdout, SetForegroundColor(Color::Reset))?; last_fg = Some(Color::Reset); }
 
@@ -444,7 +380,7 @@ impl UiExt for Editor {
             queue!(
                 stdout,
                 SetBackgroundColor(ui_bg),
-                SetForegroundColor(menu_key_fg) // <-- Start with the accent color
+                SetForegroundColor(menu_key_fg)
             )?;
 
             let mut printed_len = 0;
@@ -457,7 +393,7 @@ impl UiExt for Editor {
                             stdout,
                             SetForegroundColor(menu_key_fg),
                             Print(&num_str),
-                            SetForegroundColor(title_fg), // Leave suggestions in the standard text color for readability
+                            SetForegroundColor(title_fg),
                             Print(format!(" {}   ", sug))
                         )?;
                         printed_len += num_str.len() + 1 + sug.len() + 3;
@@ -499,7 +435,7 @@ impl UiExt for Editor {
             }
             MenuState::Menu2 => { // NEW PAGE BLOCK
                 let menu1 = [
-                    ("^P", " Prv Lne"), ("^Y", " Prev Pg"), ("^B", " Back Chr"), ("M+B", " Back Wrd"), ("^A", " Beg Line"), ("M+O", " Other 3/3")
+                    ("^P", " Prv Lne"), ("^Y", " Prev Pg"), ("^B", " Back Chr"), ("M+B", " Back Wrd"), ("^A", " Beg Line"), ("M+O", " Other 2/3")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
@@ -510,7 +446,7 @@ impl UiExt for Editor {
             }
             MenuState::Menu3 => {
                 let menu1 = [
-                    ("^\\", " Replace"), ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("", ""), ("", ""), ("M+O", " Other 2/3") // Updated
+                    ("^\\", " Replace"), ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("M+U", " Update"), ("", ""), ("M+O", " Other 3/3") // Updated
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
@@ -563,7 +499,6 @@ impl UiExt for Editor {
         if self.soft_wrap {
             let mut temp_screen_y = 0;
 
-            // Calculate total screen lines taken up by text prior to the cursor
             for i in self.row_offset..self.cursor_y {
                 let line_str = self.buffer.line(i).to_string();
                 let chars: Vec<char> = line_str.chars().filter(|c| *c != '\n' && *c != '\r').collect();
@@ -571,7 +506,6 @@ impl UiExt for Editor {
                 temp_screen_y += lines;
             }
 
-            // Calculate the specific wrap offset for the cursor on its active line
             let cursor_line_str = self.buffer.line(self.cursor_y).to_string();
             let cursor_chars: Vec<char> = cursor_line_str.chars().filter(|c| *c != '\n' && *c != '\r').collect();
             let cursor_visual = self.get_visual_cursor_x();
@@ -595,7 +529,6 @@ impl UiExt for Editor {
     }
 
     fn inline_prompt(&self, prefix: &str, initial_input: &str) -> io::Result<Option<String>> {
-        // Convert to a char vector for safe internal cursor manipulation
         let mut chars: Vec<char> = initial_input.chars().collect();
         let mut cursor_idx = chars.len();
 
@@ -606,7 +539,6 @@ impl UiExt for Editor {
         let colors = Self::derive_ui_colors(theme);
 
         loop {
-            // Rebuild the string for display
             let input_str: String = chars.iter().collect();
 
             queue!(stdout, cursor::MoveTo(0, rows - 3), SetBackgroundColor(colors.menu_bg))?;
@@ -619,7 +551,6 @@ impl UiExt for Editor {
                 terminal::Clear(ClearType::UntilNewLine)
             )?;
 
-            // place the terminal cursor exactly where the typing cursor is
             let cursor_x = prefix.len() + cursor_idx;
             queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
             stdout.flush()?;
@@ -632,8 +563,6 @@ impl UiExt for Editor {
                     }
                     KeyCode::Esc => return Ok(None),
                     KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return Ok(None),
-
-                    // --- Navigation ---
                     KeyCode::Left => cursor_idx = cursor_idx.saturating_sub(1),
                     KeyCode::Char('b') if k.modifiers.contains(KeyModifiers::CONTROL) => cursor_idx = cursor_idx.saturating_sub(1),
                     KeyCode::Right => {
@@ -642,8 +571,6 @@ impl UiExt for Editor {
                     KeyCode::Char('f') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                         if cursor_idx < chars.len() { cursor_idx += 1; }
                     }
-
-                    // --- Deletion ---
                     KeyCode::Backspace => {
                         if cursor_idx > 0 {
                             cursor_idx -= 1;
@@ -655,14 +582,12 @@ impl UiExt for Editor {
                             chars.remove(cursor_idx);
                         }
                     }
-                    // Also support nano's traditional Ctrl+D for delete
                     KeyCode::Char('d') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                         if cursor_idx < chars.len() {
                             chars.remove(cursor_idx);
                         }
                     }
-
-                    // --- Insertion ---
+                    // insert
                     KeyCode::Char(c) if !c.is_control() => {
                         chars.insert(cursor_idx, c);
                         cursor_idx += 1;
@@ -680,13 +605,12 @@ impl UiExt for Editor {
 
         self.status_time = None;
 
-        // Strip out the brackets and their contents (e.g. "[/Users/mbognar/tmp.txt]")
+        // strip out brackets
         let mut clean_prompt = prompt_text.to_string();
         if let Some(start) = clean_prompt.find('[') {
             if let Some(end) = clean_prompt.find(']') {
                 if start < end {
                     clean_prompt.replace_range(start..=end, "");
-                    // Fix any trailing spaces before the colon left behind by the removal
                     clean_prompt = clean_prompt.replace(" :", ":").replace("  ", " ");
                 }
             }
@@ -694,10 +618,9 @@ impl UiExt for Editor {
 
         let mut input = String::new();
 
-        // Update this check to use clean_prompt
         let is_save_prompt = clean_prompt.to_lowercase().contains("name to write");
 
-        // Pre-fill logic for save prompts
+        // pre-fill for save prompt
         if is_save_prompt {
             if let Some(ref fname) = self.filename {
                 // Extract just the file name to keep the prompt clean
@@ -715,7 +638,6 @@ impl UiExt for Editor {
         let mut cursor_idx = chars.len();
 
         loop {
-            // Rebuild the input string from the char vector
             input = chars.iter().collect();
 
             self.status_message = clean_prompt.clone();
@@ -749,14 +671,12 @@ impl UiExt for Editor {
                 Print(&input)
             )?;
 
-            // ADD cursor_idx to position the cursor appropriately inside the text
             cursor_x += cursor_idx;
             queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
 
             stdout.flush()?;
 
             if let Event::Key(key) = event::read()? {
-                // ... (leave the rest of your key event handling exactly as is)
                 if key.kind != event::KeyEventKind::Press {
                     continue;
                 }
@@ -768,8 +688,7 @@ impl UiExt for Editor {
                             if let Some(ref fname) = self.filename {
                                 let orig_path = std::path::Path::new(fname);
                                 if let Some(parent) = orig_path.parent() {
-                                    // Only re-apply if the user just typed a bare file name.
-                                    // (If they explicitly typed a new path like /tmp/file.txt, we leave it alone)
+                                    // if user typed a new path like /tmp/file.txt, do not change
                                     if target.components().count() == 1 {
                                         target = parent.join(&input);
                                         input = target.to_string_lossy().into_owned();
@@ -791,11 +710,6 @@ impl UiExt for Editor {
                         self.menu_state = MenuState::Menu1;
                         return Ok(Some(input));
                     }
-                    // KeyCode::Enter => {
-                    //     self.clear_status();
-                    //     self.menu_state = MenuState::Default;
-                    //     return Ok(Some(input));
-                    // }
                     KeyCode::Esc => {
                         self.set_status(String::from("Cancelled."));
                         self.menu_state = MenuState::Menu1;
@@ -816,14 +730,12 @@ impl UiExt for Editor {
                     }
                     KeyCode::Left => cursor_idx = cursor_idx.saturating_sub(1),
                     KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => cursor_idx = cursor_idx.saturating_sub(1),
-
                     KeyCode::Right => {
                         if cursor_idx < chars.len() { cursor_idx += 1; }
                     }
                     KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         if cursor_idx < chars.len() { cursor_idx += 1; }
                     }
-
                     KeyCode::Backspace => {
                         if cursor_idx > 0 {
                             cursor_idx -= 1;
@@ -840,19 +752,10 @@ impl UiExt for Editor {
                             chars.remove(cursor_idx);
                         }
                     }
-
                     KeyCode::Char(c) if !c.is_control() => {
                         chars.insert(cursor_idx, c);
                         cursor_idx += 1;
                     }
-                    // KeyCode::Backspace => {
-                    //     input.pop();
-                    // }
-                    // KeyCode::Char(c) => {
-                    //     if !c.is_control() {
-                    //         input.push(c);
-                    //     }
-                    // }
                     _ => {}
                 }
             }
@@ -979,7 +882,7 @@ impl UiExt for Editor {
             }
         }
 
-        // Canonicalize the directory to resolve any ".." or symlinks
+        // canonicalize the directory to resolve any ".." or symlinks
         if let Ok(canon) = current_dir.canonicalize() {
             current_dir = canon;
         }
@@ -1041,9 +944,6 @@ impl UiExt for Editor {
                 if selected >= scroll + visible_rows { scroll = selected - visible_rows + 1; }
 
                 let theme = &self.theme_set.themes[&self.current_theme];
-                let is_dark = Self::is_dark_theme(theme);
-
-                let theme = &self.theme_set.themes[&self.current_theme];
                 let colors = Self::derive_ui_colors(theme);
 
                 let default_cross_bg = colors.bg;
@@ -1052,14 +952,6 @@ impl UiExt for Editor {
                 let ui_bg = colors.menu_bg;
                 let title_fg = if colors.is_dark { Color::Reset } else { Color::Rgb { r: 0, g: 50, b: 150 } };
                 let menu_key_fg = colors.accent;
-
-                // let theme_bg_raw = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
-                // let default_cross_bg = Color::Rgb { r: theme_bg_raw.r, g: theme_bg_raw.g, b: theme_bg_raw.b };
-                // let default_cross_fg = if is_dark { Color::White } else { Color::Black };
-                //
-                // let ui_bg = Self::derive_ui_color(theme_bg_raw, is_dark);
-                // let title_fg = if is_dark { Color::Reset } else { Color::Rgb { r: 0, g: 50, b: 150 } };
-                // let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
 
                 queue!(stdout, SetBackgroundColor(default_cross_bg), terminal::Clear(ClearType::All))?;
 
@@ -1102,11 +994,6 @@ impl UiExt for Editor {
                         } else {
                             queue!(stdout, SetBackgroundColor(default_cross_bg), SetForegroundColor(default_cross_fg))?;
                         }
-                        // if is_selected {
-                        //     queue!(stdout, SetBackgroundColor( Color::Rgb { r: 0, g: 150, b: 200} ), SetForegroundColor(Color::White))?;
-                        // } else {
-                        //     queue!(stdout, SetBackgroundColor(default_cross_bg), SetForegroundColor(default_cross_fg))?;
-                        // }
 
                         queue!(stdout, Print(format!("{}{}", truncated, padding)))?;
                     } else {
@@ -1114,7 +1001,6 @@ impl UiExt for Editor {
                     }
                 }
 
-                // Update this line:
                 let menu_text_fg = colors.fg;
                 let col_width = (cols as usize) / 6;
 
@@ -1133,7 +1019,6 @@ impl UiExt for Editor {
                     match key.code {
                         KeyCode::Esc => return Ok(None),
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(None),
-
                         KeyCode::Up => {
                             selected = selected.saturating_sub(1);
                         }
@@ -1164,22 +1049,20 @@ impl UiExt for Editor {
                             let max_offset = entries.len().saturating_sub(1);
                             selected = (selected + visible_rows).min(max_offset);
                         }
-
                         KeyCode::Enter => {
                             let (name, is_dir) = &entries[selected];
                             if *is_dir {
                                 if name == "." {
-                                    // Generate the pre-fill string with a trailing slash
                                     let mut prefill = current_dir.to_string_lossy().into_owned();
                                     if !prefill.ends_with(std::path::MAIN_SEPARATOR) {
                                         prefill.push(std::path::MAIN_SEPARATOR);
                                     }
 
-                                    // Pass the prefill string to inline_prompt
+                                    // pass the prefill string to inline_prompt
                                     if let Some(input) = self.inline_prompt("File name to write: ", &prefill)? {
                                         let target = std::path::PathBuf::from(&input);
 
-                                        // Validate that the edited path points to a valid directory
+                                        // validate that the edited path is valid
                                         if let Some(parent) = target.parent() {
                                             if !parent.as_os_str().is_empty() && !parent.exists() {
                                                 self.set_status(String::from("File not saved. Directory does not exist."));
@@ -1187,24 +1070,10 @@ impl UiExt for Editor {
                                             }
                                         }
 
-                                        // Return the full typed input as the file path
+                                        // return file path
                                         return Ok(Some(input));
                                     }
-                                    continue; // If they hit escape or canceled, go back to the browser
-
-                                // if name == "." {
-                                //     let mut input = String::new();
-                                //     let prompt_prefix = "File name to write: ";
-                                //
-                                //     if name == "." {
-                                //         if let Some(input) = self.inline_prompt(" File name to write: ")? {
-                                //             let target = current_dir.join(&input);
-                                //             return Ok(Some(target.to_string_lossy().into_owned()));
-                                //         }
-                                //         continue; // If they hit escape or canceled, go back to the browser
-                                //     }
-                                //
-                                //     continue;
+                                    continue; // if escape or canceled, go back to the browser
                                 } else if name == ".." {
                                     if let Some(parent) = current_dir.parent() {
                                         current_dir = parent.to_path_buf();
@@ -1232,11 +1101,9 @@ impl UiExt for Editor {
 
     fn show_help(&mut self) -> io::Result<()> {
         let help_lines = [
-            "  XNANO Help",
-            "",
-            "  Menu notation:",
-            "    ^T   Ctrl+T ",
-            "    M+T  Meta+T (Alt+T)",
+            "  Notation:",
+            "    ^T   ---> Ctrl+T ",
+            "    M+T  ---> Meta+T (Alt+T)",
             "",
             "  - On MacOS, make sure you have 'Use Option as Meta' selected ",
             "    in your terminal settings",
@@ -1294,8 +1161,8 @@ impl UiExt for Editor {
 
         let mut scroll_offset = 0;
 
-        let theme = &self.theme_set.themes[&self.current_theme];
-        let is_dark = Self::is_dark_theme(theme);
+        // let theme = &self.theme_set.themes[&self.current_theme];
+        // let is_dark = Self::is_dark_theme(theme);
 
         let theme = &self.theme_set.themes[&self.current_theme];
         let colors = Self::derive_ui_colors(theme);
@@ -1306,16 +1173,6 @@ impl UiExt for Editor {
         let ui_bg = colors.menu_bg;
         let menu_key_fg = colors.accent;
         let menu_text_fg = colors.fg;
-
-        // let bg = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
-        // let fg = theme.settings.foreground.unwrap_or(syntect::highlighting::Color { r: 255, g: 255, b: 255, a: 255 });
-        //
-        // let theme_bg = Color::Rgb { r: bg.r, g: bg.g, b: bg.b };
-        // let theme_fg = Color::Rgb { r: fg.r, g: fg.g, b: fg.b };
-        //
-        // let ui_bg = Self::derive_ui_color(bg, is_dark);
-        // let menu_key_fg = if is_dark { Color::Rgb { r: 0, g: 150, b: 200 } } else { Color::Rgb { r: 0, g: 100, b: 200 } };
-        // let menu_text_fg = if is_dark { Color::Reset } else { Color::Black };
 
         loop {
             let mut stdout = stdout();
@@ -1343,25 +1200,22 @@ impl UiExt for Editor {
                     let line = help_lines[line_idx];
                     let truncated = if line.len() > cols as usize { &line[..(cols as usize)] } else { line };
 
-                    // --- NEW BULLETPROOF PARSER ---
                     let mut split_idx = None;
 
-                    // Only process lines that start with exactly 4 spaces (these are the hotkey lines)
+                    // process lines that start with 4 spaces
                     if truncated.starts_with("    ") && !truncated.starts_with("     ") {
                         let mut found_double_space = false;
                         let mut prev_char_was_space = false;
 
-                        // Scan character-by-character after the initial 4 spaces
                         for (idx, c) in truncated.char_indices().skip(4) {
                             if c == ' ' {
                                 if prev_char_was_space {
-                                    // We hit two spaces in a row! We found the gap.
+                                    // double space indicates hot-key is finished
                                     found_double_space = true;
                                 }
                                 prev_char_was_space = true;
                             } else {
-                                // The moment we hit a character AFTER finding the gap,
-                                // we have found the exact start of the description text!
+                                // description text
                                 if found_double_space {
                                     split_idx = Some(idx);
                                     break;
@@ -1372,7 +1226,7 @@ impl UiExt for Editor {
                     }
 
                     if let Some(idx) = split_idx {
-                        // Split the line precisely where the description starts
+                        // split the line where the description starts
                         let (hotkey, desc) = truncated.split_at(idx);
                         queue!(
                             stdout,
@@ -1382,7 +1236,7 @@ impl UiExt for Editor {
                             Print(desc)
                         )?;
                     } else {
-                        // Standard line (headings, blank lines, or wrapped text)
+                        // standard text
                         queue!(stdout, SetForegroundColor(theme_fg), Print(truncated))?;
                     }
                     // ------------------------------
@@ -1390,18 +1244,6 @@ impl UiExt for Editor {
 
                 queue!(stdout, terminal::Clear(ClearType::UntilNewLine))?;
             }
-
-            // for i in 0..visible_rows {
-            //     queue!(stdout, cursor::MoveTo(0, (i + 1) as u16))?;
-            //     let line_idx = scroll_offset + i;
-            //     if line_idx < help_lines.len() {
-            //         let line = help_lines[line_idx];
-            //         let truncated = if line.len() > cols as usize { &line[..(cols as usize)] } else { line };
-            //         queue!(stdout, Print(truncated))?;
-            //     }
-            //
-            //     queue!(stdout, terminal::Clear(ClearType::UntilNewLine))?;
-            // }
 
             let col_width = (cols as usize) / 6;
 
@@ -1422,7 +1264,6 @@ impl UiExt for Editor {
                     KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                     KeyCode::F(2) => break,
                     KeyCode::Esc => break,
-
                     KeyCode::Up => {
                         scroll_offset = scroll_offset.saturating_sub(1);
                     }
@@ -1494,13 +1335,12 @@ impl UiExt for Editor {
                 }
             }
 
-            // --- NEW: Skip spaces that would appear at the start of a wrapped line ---
-            // (We ensure i > 0 so we don't accidentally delete intentional indentation at the start of a paragraph)
+            // skip spaces that would appear at the start of a wrapped line
             let is_wrap_space = (current_x == 0 || current_x >= available_width) && i > 0 && ch.is_whitespace();
             let display_chars = if ch == '\t' { 4 - (visual_x % 4) } else { 1 };
 
             if is_wrap_space {
-                // Keep the cursor tracking accurate even though we skip the visual footprint
+                // cursor tracking
                 for _ in 0..display_chars {
                     if Some(visual_x) == target_visual_x {
                         target_y = if current_x >= available_width { current_y + 1 } else { current_y };
