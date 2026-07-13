@@ -1,9 +1,9 @@
 [package]
 name = "xnano"
-version = "0.1.6"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
-keywords = ["text-editor", "terminal", "tui", "syntax"]
+keywords = ["text", "editor", "terminal", "tui", "syntax"]
 categories = ["text-editors"]
 description = "Efficient, fast text editor with syntax highlighting, themes, spellcheck. Written from the ground-up in Rust. Tested with macOS, Linux, Windows, BSD."
 readme = true
@@ -18,3 +18,14 @@ include_dir = "0.7.4"
 ureq = { version = "2.9.1", features = ["json"] }
 serde_json = "1.0"
 webbrowser = "0.8"
+
+[package.metadata.deb]
+maintainer = "Matt Bognar <mattbognar@gmail.com>"
+copyright = "2024, Matthew Bognar"
+license-file = ["LICENSE", "4"]
+depends = "$auto"
+extended-description = """
+Efficient, fast text editor with syntax highlighting, themes, spellcheck. Written from the ground-up in Rust.
+"""
+section = "text editor"
+priority = "optional"
