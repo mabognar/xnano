@@ -1,10 +1,16 @@
 # xnano
-xnano is a fast text editor, inspired by nano, written from the ground-up in Rust. Includes syntax highlighting, themes, update checker, soft line-wrap, 
-line numbers, etc. Efficient and easy to use. 30 included themes.
+xnano is a fast, efficient text editor written from the ground-up in Rust. Includes syntax highlighting, themes, update checker, soft line-wrap, 
+line numbers, etc. 
 
 <img width="852" height="700" alt="xnano1" src="https://github.com/user-attachments/assets/b53f50da-3f7c-472e-a2dc-2df6562d2d41" />
 <img width="852" height="700" alt="xnano2" src="https://github.com/user-attachments/assets/c75fd1be-8d2f-4f0b-baf5-9a551e9ed2bb" />
 <img width="852" height="700" alt="xnano3" src="https://github.com/user-attachments/assets/3fc045ec-3942-4077-9712-7e799f862e3a" />
+
+## Download
+For macOS and Linux (.deb) binaries, go to
+````
+https://github.com/mabognar/xnano/releases/latest
+````
 
 ## Build
 In suitable directory, run
