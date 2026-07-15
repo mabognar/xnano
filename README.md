@@ -6,6 +6,8 @@ line numbers, etc.
 <img width="852" height="700" alt="xnano2" src="https://github.com/user-attachments/assets/c75fd1be-8d2f-4f0b-baf5-9a551e9ed2bb" />
 <img width="852" height="700" alt="xnano3" src="https://github.com/user-attachments/assets/3fc045ec-3942-4077-9712-7e799f862e3a" />
 
+[xnano-mov.webm](https://github.com/user-attachments/assets/fb776553-e205-4d66-94da-0e12319a00bf)
+
 ## Download
 For macOS and Linux (.deb) binaries, go to
 ````
