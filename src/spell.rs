@@ -10,6 +10,7 @@ pub trait SpellExt {
     fn find_next_misspelled(&self, start_idx: usize) -> Option<(String, usize, usize)>;
     fn spell_check(&mut self) -> io::Result<()>;
     fn get_suggestions(word: &str, dict: &HashSet<String>) -> Vec<String>;
+    fn get_distance(a: &str, b: &str) -> usize;
 }
 
 impl SpellExt for Editor {
@@ -98,10 +99,33 @@ impl SpellExt for Editor {
             self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + word_len));
             self.draw_screen()?;
 
-            let dict = self.dictionary.as_ref().unwrap();
-            let suggestions = Self::get_suggestions(&lower_word, dict);
+            // let dict = self.dictionary.as_ref().unwrap();
+            // let suggestions = Self::get_suggestions(&lower_word, dict);
+            //
+            // self.current_suggestions = suggestions.into_iter().take(4).collect();
 
-            self.current_suggestions = suggestions.into_iter().take(4).collect();
+            let dict = self.dictionary.as_ref().unwrap();
+            let raw_suggestions = Self::get_suggestions(&lower_word, dict);
+
+            // Check if the original word's first character is uppercase
+            let is_capitalized = word.chars().next().map_or(false, char::is_uppercase);
+
+            // Format the suggestions to match the original casing
+            let formatted_suggestions: Vec<String> = if is_capitalized {
+                raw_suggestions.into_iter().map(|s| {
+                    let mut chars = s.chars();
+                    match chars.next() {
+                        None => String::new(),
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    }
+                }).collect()
+            } else {
+                raw_suggestions
+            };
+
+            // Store the appropriately cased suggestions
+            self.current_suggestions = formatted_suggestions.into_iter().take(5).collect();
+
             self.menu_state = MenuState::SpellCheck;
 
             let choice_result = self.prompt("Replace with: ", false)?;
@@ -117,10 +141,10 @@ impl SpellExt for Editor {
                     self.ignored_words.insert(lower_word);
                     current_idx = end;
                 } else if choice_clean == "a" {
-                    // Add to the active session dictionary
+                    // add to dictionary
                     self.dictionary.as_mut().unwrap().insert(lower_word.clone());
 
-                    // Add to the persistent file
+                    // write to file
                     if let Some(mut custom_path) = Self::get_base_dir() {
                         custom_path.push("custom_dict.txt");
                         // OpenOptions allows us to append to the file, or create it if it doesn't exist
@@ -166,28 +190,46 @@ impl SpellExt for Editor {
     fn get_suggestions(word: &str, dict: &HashSet<String>) -> Vec<String> {
         let mut scored: Vec<(&String, usize)> = dict.iter()
             .filter(|w| (w.len() as isize - word.len() as isize).abs() <= 2)
-            .map(|w| (w, edit_distance(word, w)))
+            .map(|w| (w, Self::get_distance(word, w)))
             .filter(|(_, dist)| *dist <= 3)
             .collect();
 
         scored.sort_by_key(|&(_, dist)| dist);
         scored.into_iter().take(6).map(|(w, _)| w.clone()).collect()
     }
-}
 
-pub fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut cache: Vec<usize> = (0..=b.len()).collect();
-    let mut result = cache.clone();
+    fn get_distance(a: &str, b: &str) -> usize {
+        let a: Vec<char> = a.chars().collect();
+        let b: Vec<char> = b.chars().collect();
+        let mut cache: Vec<usize> = (0..=b.len()).collect();
+        let mut result = cache.clone();
 
-    for (i, &a_char) in a.iter().enumerate() {
-        result[0] = i + 1;
-        for (j, &b_char) in b.iter().enumerate() {
-            let cost = if a_char == b_char { 0 } else { 1 };
-            result[j + 1] = (result[j] + 1).min(cache[j + 1] + 1).min(cache[j] + cost);
+        for (i, &a_char) in a.iter().enumerate() {
+            result[0] = i + 1;
+            for (j, &b_char) in b.iter().enumerate() {
+                let cost = if a_char == b_char { 0 } else { 1 };
+                result[j + 1] = (result[j] + 1).min(cache[j + 1] + 1).min(cache[j] + cost);
+            }
+            cache.copy_from_slice(&result);
         }
-        cache.copy_from_slice(&result);
+        result[b.len()]
     }
-    result[b.len()]
+
 }
+
+// pub fn get_distance(a: &str, b: &str) -> usize {
+//     let a: Vec<char> = a.chars().collect();
+//     let b: Vec<char> = b.chars().collect();
+//     let mut cache: Vec<usize> = (0..=b.len()).collect();
+//     let mut result = cache.clone();
+//
+//     for (i, &a_char) in a.iter().enumerate() {
+//         result[0] = i + 1;
+//         for (j, &b_char) in b.iter().enumerate() {
+//             let cost = if a_char == b_char { 0 } else { 1 };
+//             result[j + 1] = (result[j] + 1).min(cache[j + 1] + 1).min(cache[j] + cost);
+//         }
+//         cache.copy_from_slice(&result);
+//     }
+//     result[b.len()]
+// }

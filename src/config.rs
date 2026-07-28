@@ -20,14 +20,14 @@ pub struct UiColors {
 
 pub trait ConfigExt {
     fn cycle_theme(&mut self);
-    fn derive_ui_colors(theme: &Theme) -> UiColors;
+    fn get_theme_colors(theme: &Theme) -> UiColors;
     fn get_base_dir() -> Option<PathBuf>;
     fn get_config_path() -> Option<PathBuf>;
-    fn get_theme_dir() -> Option<PathBuf>;
+    fn get_themes_dir() -> Option<PathBuf>;
     fn initialize_themes() -> std::io::Result<()>;
     fn load_config() -> (String, bool, bool);
     fn save_config(&self);
-    fn update_cursor_color(&self);
+    // fn update_cursor_color(&self);
 }
 
 impl ConfigExt for Editor {
@@ -45,22 +45,21 @@ impl ConfigExt for Editor {
             self.status_message = format!("Theme changed to: {}", self.current_theme);
             self.status_time = Some(std::time::Instant::now());
 
-            // Trigger the cursor color update whenever the theme changes
-            self.update_cursor_color();
+            // self.update_cursor_color();
         }
     }
 
-    fn derive_ui_colors(theme: &Theme) -> UiColors {
+    fn get_theme_colors(theme: &Theme) -> UiColors {
         let raw_bg = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
         let raw_fg = theme.settings.foreground.unwrap_or(syntect::highlighting::Color { r: 255, g: 255, b: 255, a: 255 });
 
-        let bg = Color::Rgb { r: raw_bg.r, g: raw_bg.g, b: raw_bg.b };
-        let fg = Color::Rgb { r: raw_fg.r, g: raw_fg.g, b: raw_fg.b };
+        let editor_bg = Color::Rgb { r: raw_bg.r, g: raw_bg.g, b: raw_bg.b };
+        let editor_fg = Color::Rgb { r: raw_fg.r, g: raw_fg.g, b: raw_fg.b };
 
         // determine luminance
         let is_dark = (raw_bg.r as u32 + raw_bg.g as u32 + raw_bg.b as u32) < 384;
 
-        let ui_bg = if is_dark {
+        let menu_bg = if is_dark {
             Color::Rgb { r: raw_bg.r.saturating_add(20), g: raw_bg.g.saturating_add(20), b: raw_bg.b.saturating_add(20) }
         } else {
             Color::Rgb { r: raw_bg.r.saturating_sub(20), g: raw_bg.g.saturating_sub(20), b: raw_bg.b.saturating_sub(20) }
@@ -86,20 +85,20 @@ impl ConfigExt for Editor {
             None
         };
 
-        let mut accent = get_theme_color(&["entity.name.function", "variable"])
+        let mut menu_hot_key = get_theme_color(&["entity.name.function", "variable"])
             .unwrap_or(if is_dark { Color::Rgb { r: 100, g: 200, b: 255 } } else { Color::Rgb { r: 20, g: 100, b: 180 } });
 
         if let Some(name) = &theme.name {
             let lower_name = name.to_lowercase();
 
             if lower_name.contains("catppuccin") {
-                accent = if is_dark {
+                menu_hot_key = if is_dark {
                     Color::Rgb { r: 249, g: 226, b: 175 }
                 } else {
                     Color::Rgb { r: 223, g: 142, b: 29 }
                 };
             } else if lower_name.contains("base16") {
-                accent = if is_dark {
+                menu_hot_key = if is_dark {
                     Color::Rgb { r: 250, g: 188, b: 45 }
                 } else {
                     Color::Rgb { r: 200, g: 60, b: 20 }
@@ -107,7 +106,28 @@ impl ConfigExt for Editor {
             }
         }
 
-        UiColors { bg, fg, menu_bg: ui_bg, selected_bg, accent, is_dark }
+        if let Color::Rgb { r, g, b } = menu_hot_key {
+            let grey_shift = 80;
+
+            let (cursor_r, cursor_g, cursor_b) = if is_dark {
+                // lighten the cursor in dark mode
+                (r.saturating_sub(grey_shift), g.saturating_sub(grey_shift), b.saturating_sub(grey_shift))
+            } else {
+                // darken the cursor in light mode
+                (r.saturating_add(grey_shift), g.saturating_add(grey_shift), b.saturating_add(grey_shift))
+            };
+
+            print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", cursor_r, cursor_g, cursor_b);
+
+            // if is_dark {
+            //     print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", 120, 120, 120);
+            // } else {
+            //     print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", 180, 180, 180);
+            // }
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+
+        UiColors { bg: editor_bg, fg: editor_fg, menu_bg, selected_bg, accent: menu_hot_key, is_dark }
 
     }
 
@@ -126,19 +146,19 @@ impl ConfigExt for Editor {
         Self::get_base_dir().map(|p| p.join("xnanorc"))
     }
 
-    fn get_theme_dir() -> Option<PathBuf> {
+    fn get_themes_dir() -> Option<PathBuf> {
         Self::get_base_dir().map(|p| {
-            let theme_path = p.join("themes");
-            let _ = fs::create_dir_all(&theme_path);
-            theme_path
+            let themes_dir = p.join("themes");
+            let _ = fs::create_dir_all(&themes_dir);
+            themes_dir
         })
     }
 
     fn initialize_themes() -> std::io::Result<()> {
-        if let Some(theme_dir) = Self::get_theme_dir() {
-            if fs::read_dir(&theme_dir)?.next().is_none() {
+        if let Some(themes_dir) = Self::get_themes_dir() {
+            if fs::read_dir(&themes_dir)?.next().is_none() {
                 for file in BUNDLED_THEMES.files() {
-                    let path = theme_dir.join(file.path());
+                    let path = themes_dir.join(file.path());
                     fs::write(path, file.contents())?;
                 }
             }
@@ -179,8 +199,4 @@ impl ConfigExt for Editor {
         }
     }
 
-    fn update_cursor_color(&self) {
-        print!("\x1b]12;#888888\x07");
-        let _ = std::io::Write::flush(&mut std::io::stdout());
-    }
 }

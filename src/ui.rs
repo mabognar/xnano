@@ -79,7 +79,7 @@ impl UiExt for Editor {
         let visible_rows = rows.saturating_sub(3) as usize;
 
         let theme = &self.theme_set.themes[&self.current_theme];
-        let colors = Self::derive_ui_colors(theme);
+        let colors = Self::get_theme_colors(theme);
 
         let ui_bg = colors.menu_bg;
         let title_fg = if colors.is_dark { Color::Reset } else { Color::Black };
@@ -178,7 +178,14 @@ impl UiExt for Editor {
         let default_cross_bg = colors.bg;
 
         let max_line_num_len = self.buffer.len_lines().to_string().len();
-        let gutter_width = if self.show_line_numbers { max_line_num_len + 1 } else { 0 };
+        let gutter_width = if self.show_line_numbers {
+            max_line_num_len + 2
+        } else if !self.line_marks.is_empty() {
+            2
+        } else {
+            0
+        };
+        // let gutter_width = if self.show_line_numbers { max_line_num_len + 2 } else { 0 };
         let available_width = (cols as usize).saturating_sub(gutter_width).saturating_sub(1);
 
         let cursor_absolute = self.get_cursor_char_idx();
@@ -214,12 +221,44 @@ impl UiExt for Editor {
                 let line_has_search_highlight = self.highlight_match.map_or(false, |(h_y, _, _)| h_y == file_y);
 
                 queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
-                if self.show_line_numbers {
-                    let num_str = format!("{:>width$} ", file_y + 1, width = max_line_num_len);
+
+                if gutter_width > 0 {
+                    // 1. Always check for the mark
+                    let mark_indicator = if self.line_marks.contains(&file_y) { "*" } else { " " };
+
+                    // 2. Format the gutter string depending on the line number setting
+                    let gutter_str = if self.show_line_numbers {
+                        format!("{:>width$}{} ", file_y + 1, mark_indicator, width = max_line_num_len)
+                    } else {
+                        format!("{} ", mark_indicator)
+                    };
+
+                    // 3. Print the gutter
                     if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
                     if last_fg != Some(menu_key_fg) { queue!(stdout, SetForegroundColor(menu_key_fg))?; last_fg = Some(menu_key_fg); }
-                    queue!(stdout, Print(num_str))?;
+                    queue!(stdout, Print(gutter_str))?;
                 }
+
+                // queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
+                // if self.show_line_numbers {
+                //     // Check if the current line is in our marks set
+                //     let mark_indicator = if self.line_marks.contains(&file_y) { "*" } else { " " };
+                //
+                //     // Add the indicator to the string formatting
+                //     let num_str = format!("{:>width$}{} ", file_y + 1, mark_indicator, width = max_line_num_len);
+                //
+                //     if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
+                //     if last_fg != Some(menu_key_fg) { queue!(stdout, SetForegroundColor(menu_key_fg))?; last_fg = Some(menu_key_fg); }
+                //     queue!(stdout, Print(num_str))?;
+                // }
+
+                // queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
+                // if self.show_line_numbers {
+                //     let num_str = format!("{:>width$} ", file_y + 1, width = max_line_num_len);
+                //     if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
+                //     if last_fg != Some(menu_key_fg) { queue!(stdout, SetForegroundColor(menu_key_fg))?; last_fg = Some(menu_key_fg); }
+                //     queue!(stdout, Print(num_str))?;
+                // }
 
                 let mut printed_on_current_line = 0;
 
@@ -385,24 +424,24 @@ impl UiExt for Editor {
 
             let mut printed_len = 0;
 
-            if self.menu_state == MenuState::SpellCheck {
-                if !self.current_suggestions.is_empty() {
-                    for (i, sug) in self.current_suggestions.iter().enumerate() {
-                        let num_str = format!("{}", i + 1);
-                        queue!(
-                            stdout,
-                            SetForegroundColor(menu_key_fg),
-                            Print(&num_str),
-                            SetForegroundColor(title_fg),
-                            Print(format!(" {}   ", sug))
-                        )?;
-                        printed_len += num_str.len() + 1 + sug.len() + 3;
-                    }
-                } else {
-                    queue!(stdout, SetForegroundColor(title_fg), Print("No suggestions   "))?;
-                    printed_len += "No suggestions   ".len();
-                }
-            }
+            // if self.menu_state == MenuState::SpellCheck {
+            //     if !self.current_suggestions.is_empty() {
+            //         for (i, sug) in self.current_suggestions.iter().enumerate() {
+            //             let num_str = format!("{}", i + 1);
+            //             queue!(
+            //                 stdout,
+            //                 SetForegroundColor(menu_key_fg),
+            //                 Print(&num_str),
+            //                 SetForegroundColor(title_fg),
+            //                 Print(format!(" {}   ", sug))
+            //             )?;
+            //             printed_len += num_str.len() + 1 + sug.len() + 3;
+            //         }
+            //     } else {
+            //         queue!(stdout, SetForegroundColor(title_fg), Print("No suggestions   "))?;
+            //         printed_len += "No suggestions   ".len();
+            //     }
+            // }
 
             let status_text = format!("{}", self.status_message);
             queue!(stdout, SetForegroundColor(menu_key_fg), Print(&status_text))?;
@@ -446,12 +485,12 @@ impl UiExt for Editor {
             }
             MenuState::Menu3 => {
                 let menu1 = [
-                    ("^\\", " Replace"), ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("M+U", " Update"), ("", ""), ("M+O", " Other 3/3") // Updated
+                    ("^\\", " Replace"), ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 3/3") // Updated
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
                 let menu2 = [
-                    ("^D", " Delete"), ("M+A", " Mark Beg"), ("M+L", " Line Num"), ("", ""), ("", ""), (" ^H", " Help")
+                    ("^D", " Delete"), ("M+A", " Mark Beg"), ("M+U", " Update"), ("M+L", " Line Num"), ("M+.", " Next Mrk"), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
@@ -485,10 +524,30 @@ impl UiExt for Editor {
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
             MenuState::SpellCheck => {
-                let menu1 = [("i", "gnore"), ("a", "dd to dict")];
-                Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
+                let col_width = (cols as usize) / 5;
 
-                let menu2 = [("^C", " Cancel")];
+                // Dynamically build the suggestions for Menu 1
+                let keys = ["1", "2", "3", "4", "5"];
+                let formatted_sugs: Vec<String> = self.current_suggestions
+                    .iter()
+                    .map(|s| format!(" {}", s))
+                    .collect();
+
+                let mut menu1_items: Vec<(&str, &str)> = Vec::new();
+
+                if formatted_sugs.is_empty() {
+                    menu1_items.push(("", "No suggestions"));
+                } else {
+                    for (i, sug) in formatted_sugs.iter().enumerate() {
+                        let key = keys.get(i).unwrap_or(&"");
+                        menu1_items.push((key, sug.as_str()));
+                    }
+                }
+
+                Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1_items, ui_bg, menu_key_fg, menu_text_fg)?;
+
+                // Define the fixed commands for Menu 2
+                let menu2 = [("^C", " Cancel"), ("I", " Ignore"), ("A", " Add to Dict")];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
         }
@@ -536,7 +595,7 @@ impl UiExt for Editor {
         let (_, rows) = terminal::size()?;
 
         let theme = &self.theme_set.themes[&self.current_theme];
-        let colors = Self::derive_ui_colors(theme);
+        let colors = Self::get_theme_colors(theme);
 
         loop {
             let input_str: String = chars.iter().collect();
@@ -648,21 +707,21 @@ impl UiExt for Editor {
 
             let mut cursor_x = clean_prompt.len();
 
-            if self.menu_state == MenuState::SpellCheck {
-                if !self.current_suggestions.is_empty() {
-                    for (i, sug) in self.current_suggestions.iter().enumerate() {
-                        let num_str = format!("{}", i + 1);
-                        cursor_x += num_str.len() + 1 + sug.len() + 3;
-                    }
-                } else {
-                    cursor_x += "No suggestions   ".len();
-                }
-            }
+            // if self.menu_state == MenuState::SpellCheck {
+            //     if !self.current_suggestions.is_empty() {
+            //         for (i, sug) in self.current_suggestions.iter().enumerate() {
+            //             let num_str = format!("{}", i + 1);
+            //             cursor_x += num_str.len() + 1 + sug.len() + 3;
+            //         }
+            //     } else {
+            //         cursor_x += "No suggestions   ".len();
+            //     }
+            // }
 
             queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
 
             let theme = &self.theme_set.themes[&self.current_theme];
-            let colors = Self::derive_ui_colors(theme);
+            let colors = Self::get_theme_colors(theme);
 
             queue!(
                 stdout,
@@ -944,7 +1003,7 @@ impl UiExt for Editor {
                 if selected >= scroll + visible_rows { scroll = selected - visible_rows + 1; }
 
                 let theme = &self.theme_set.themes[&self.current_theme];
-                let colors = Self::derive_ui_colors(theme);
+                let colors = Self::get_theme_colors(theme);
 
                 let default_cross_bg = colors.bg;
                 let default_cross_fg = colors.fg;
@@ -1165,7 +1224,7 @@ impl UiExt for Editor {
         // let is_dark = Self::is_dark_theme(theme);
 
         let theme = &self.theme_set.themes[&self.current_theme];
-        let colors = Self::derive_ui_colors(theme);
+        let colors = Self::get_theme_colors(theme);
 
         let theme_bg = colors.bg;
         let theme_fg = colors.fg;

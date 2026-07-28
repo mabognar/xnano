@@ -8,6 +8,8 @@ use ropey::Rope;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use crossterm::{execute, terminal, event::{self, Event, KeyCode, KeyModifiers}};
+use std::collections::BTreeSet;
+
 
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -61,6 +63,7 @@ pub struct Editor {
     pub(crate) escape_pending: bool, // Added escape tracker for macOS terminal fallback
     pub(crate) update_rx: Option<Receiver<String>>,
     pub(crate) update_version: Option<String>,
+    pub line_marks: BTreeSet<usize>,
 }
 
 impl Editor {
@@ -80,7 +83,7 @@ impl Editor {
         let mut themes_found = 0;
         let mut error_occurred = None;
 
-        if let Some(theme_dir) = Self::get_theme_dir() {
+        if let Some(theme_dir) = Self::get_themes_dir() {
             if let Ok(custom_themes) = ThemeSet::load_from_folder(&theme_dir) {
                 themes_found += custom_themes.themes.len();
                 theme_set.themes.extend(custom_themes.themes);
@@ -162,6 +165,7 @@ impl Editor {
             escape_pending: false, // Initialize tracker
             update_rx: Some(update_rx),
             update_version: None,
+            line_marks: BTreeSet::new(),
         }
     }
 
@@ -204,7 +208,7 @@ impl Editor {
         let mut stdout = io::stdout();
         execute!(stdout, terminal::EnterAlternateScreen)?;
 
-        self.update_cursor_color();
+        // self.update_cursor_color();
 
         loop {
             // check for update in background
@@ -527,10 +531,12 @@ impl Editor {
                 KeyCode::Char('k') if is_ctrl => {
                     self.cut_line();
                     current_action_is_cut = true;
+                    self.adjust_marks_on_delete(self.cursor_y);
                 }
                 KeyCode::F(9) => {
                     self.cut_line();
                     current_action_is_cut = true;
+                    self.adjust_marks_on_delete(self.cursor_y);
                 }
 
                 KeyCode::Char('u') if is_ctrl => {
@@ -552,10 +558,10 @@ impl Editor {
                 }
 
                 KeyCode::Char('t') if is_ctrl => self.spell_check()?,
-                KeyCode::F(12) => self.spell_check()?,
+                KeyCode::F(12) if key.modifiers.contains(KeyModifiers::NONE) => self.spell_check()?,
 
                 KeyCode::Char('c') if is_ctrl => self.cur_pos(),
-                KeyCode::F(11) => self.cur_pos(),
+                KeyCode::F(11) if key.modifiers.contains(KeyModifiers::NONE) => self.cur_pos(),
 
                 KeyCode::Char('l') if is_ctrl => self.go_to_line()?,
 
@@ -652,6 +658,24 @@ impl Editor {
                         }
                     }
                 }
+                KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    self.toggle_line_mark();
+                }
+                // Jump to Previous Mark
+                KeyCode::F(11) | KeyCode::PageUp | KeyCode::Char(',') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    self.goto_prev_mark()?;
+                }
+
+                // Jump to Next Mark
+                KeyCode::F(12) | KeyCode::PageDown | KeyCode::Char('.') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    self.goto_next_mark()?;
+                }
+                // KeyCode::F(11) if key.modifiers.contains(KeyModifiers::ALT) => {
+                //     self.goto_prev_mark()?;
+                // }
+                // KeyCode::F(12) if key.modifiers.contains(KeyModifiers::ALT) => {
+                //     self.goto_next_mark()?;
+                // }
                 _ => { self.clear_status(); }
             }
             if !keep_justified {
@@ -1129,6 +1153,77 @@ impl Editor {
         self.cursor_y = self.buffer.char_to_line(idx);
         self.cursor_x = idx - self.buffer.line_to_char(self.cursor_y);
         self.desired_cursor_x = self.cursor_x;
+    }
+
+    pub fn toggle_line_mark(&mut self) {
+        if self.line_marks.contains(&self.cursor_y) {
+            self.line_marks.remove(&self.cursor_y);
+            self.set_status(String::from("Mark removed"));
+        } else {
+            self.line_marks.insert(self.cursor_y);
+            self.set_status(String::from("Mark set"));
+        }
+    }
+
+    pub fn goto_prev_mark(&mut self) -> std::io::Result<()> {
+        if self.line_marks.is_empty() {
+            self.set_status(String::from("No marks set"));
+            return Ok(());
+        }
+
+        // Find the largest mark smaller than our current line, or wrap around to the highest mark
+        let prev = self.line_marks.range(..self.cursor_y).next_back()
+            .or_else(|| self.line_marks.iter().next_back())
+            .copied();
+
+        if let Some(line) = prev {
+            self.cursor_y = line;
+            self.cursor_x = 0; // Or keep current x if preferred
+            self.desired_cursor_x = self.cursor_x;
+            self.scroll()?; // Use your existing scroll logic to update the viewport
+            self.set_status(String::from("Jumped to previous mark"));
+        }
+        Ok(())
+    }
+
+    pub fn goto_next_mark(&mut self) -> std::io::Result<()> {
+        if self.line_marks.is_empty() {
+            self.set_status(String::from("No marks set"));
+            return Ok(());
+        }
+
+        // Find the smallest mark larger than our current line, or wrap around to the lowest mark
+        let next = self.line_marks.range((self.cursor_y + 1)..).next()
+            .or_else(|| self.line_marks.iter().next())
+            .copied();
+
+        if let Some(line) = next {
+            self.cursor_y = line;
+            self.cursor_x = 0; // Or keep current x if preferred
+            self.desired_cursor_x = self.cursor_x;
+            self.scroll()?; // Use your existing scroll logic to update the viewport
+            self.set_status(String::from("Jumped to next mark"));
+        }
+        Ok(())
+    }
+
+    pub fn adjust_marks_on_delete(&mut self, deleted_line: usize) {
+        let mut new_marks = BTreeSet::new();
+
+        for &mark in &self.line_marks {
+            if mark < deleted_line {
+                // Marks above the cut line stay exactly where they are
+                new_marks.insert(mark);
+            } else if mark == deleted_line {
+                // Do nothing! The mark is simply deleted along with the line.
+                continue;
+            } else {
+                // Marks below the cut line shift up by 1 to follow their text
+                new_marks.insert(mark - 1);
+            }
+        }
+
+        self.line_marks = new_marks;
     }
 }
 
