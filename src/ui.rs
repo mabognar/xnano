@@ -90,7 +90,7 @@ impl UiExt for Editor {
         let dollar_fg = if colors.is_dark { Color::Black } else { Color::White };
 
         let version = env!("CARGO_PKG_VERSION");
-        let title = format!("xnano ({}) - ", version);
+        let title = format!("xnano ({})  ", version);
 
         queue!(stdout, cursor::MoveTo(0, 0), SetBackgroundColor(ui_bg))?;
 
@@ -115,10 +115,10 @@ impl UiExt for Editor {
         let file_section = format!("{}", file_display_string);
 
         // --- NEW TITLE BAR LOGIC ---
-        let mod_star = if self.is_modified { " *" } else { "" };
+        let mod_star = if self.is_modified { "*" } else { "" };
 
         // Build the cursor position string (adding 1 so it is 1-based instead of 0-based index)
-        let cursor_str = format!("L:{} C:{} -", self.cursor_y + 1, self.cursor_x + 1);
+        let cursor_str = format!("  L:{} C:{}", self.cursor_y + 1, self.cursor_x + 1);
 
         // Calculate the exact space needed on the right side: cursor string + " S L" (4 chars)
         let indicators_len = cursor_str.chars().count() + 4;
@@ -131,12 +131,31 @@ impl UiExt for Editor {
         if full_len > max_allowable_len {
             let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count() + mod_star.chars().count());
             if allowed_file_len > 3 {
-                final_file_section = file_section.chars().take(allowed_file_len.saturating_sub(3)).collect();
-                final_file_section.push_str("...");
+                // Calculate how many characters from the END of the path we can keep
+                let keep_len = allowed_file_len.saturating_sub(3);
+                let skip_len = file_section.chars().count().saturating_sub(keep_len);
+
+                // Skip the beginning characters and collect the tail
+                let tail: String = file_section.chars().skip(skip_len).collect();
+
+                // Prepend the dots
+                final_file_section = format!("...{}", tail);
             } else {
                 final_file_section = String::new();
             }
         }
+
+        // // truncate only if the file path overflows, making room for the asterisk
+        // let mut final_file_section = file_section.clone();
+        // if full_len > max_allowable_len {
+        //     let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count() + mod_star.chars().count());
+        //     if allowed_file_len > 3 {
+        //         final_file_section = file_section.chars().take(allowed_file_len.saturating_sub(3)).collect();
+        //         final_file_section.push_str("... ");
+        //     } else {
+        //         final_file_section = String::new();
+        //     }
+        // }
 
         let printed_left_len = title.chars().count() + final_file_section.chars().count() + mod_star.chars().count();
         let pad2_len = (cols as usize).saturating_sub(printed_left_len + indicators_len);
