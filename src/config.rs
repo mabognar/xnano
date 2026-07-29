@@ -16,6 +16,7 @@ pub struct UiColors {
     pub selected_bg: Color,
     pub accent: Color,
     pub is_dark: bool,
+    pub indicator: Color,
 }
 
 pub trait ConfigExt {
@@ -88,6 +89,9 @@ impl ConfigExt for Editor {
         let mut menu_hot_key = get_theme_color(&["entity.name.function", "variable"])
             .unwrap_or(if is_dark { Color::Rgb { r: 100, g: 200, b: 255 } } else { Color::Rgb { r: 20, g: 100, b: 180 } });
 
+        let mut indicator_color = get_theme_color(&["constant.numeric", "markup.inserted", "support.type"])
+            .unwrap_or(if is_dark { Color::Rgb { r: 255, g: 100, b: 100 } } else { Color::Rgb { r: 255, g: 100, b: 100 } });
+
         if let Some(name) = &theme.name {
             let lower_name = name.to_lowercase();
 
@@ -127,7 +131,14 @@ impl ConfigExt for Editor {
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
 
-        UiColors { bg: editor_bg, fg: editor_fg, menu_bg, selected_bg, accent: menu_hot_key, is_dark }
+        UiColors { bg: editor_bg,
+            fg: editor_fg,
+            menu_bg,
+            selected_bg,
+            accent: menu_hot_key,
+            indicator: indicator_color,
+            is_dark
+        }
 
     }
 

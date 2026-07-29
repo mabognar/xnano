@@ -156,6 +156,7 @@ impl SpellExt for Editor {
                     current_idx = end;
                 } else if let Ok(num) = choice_clean.parse::<usize>() {
                     if num > 0 && num <= current_suggs_copy.len() {
+                        self.snapshot();
                         let replacement = &current_suggs_copy[num - 1];
                         self.buffer.remove(start..end);
                         self.buffer.insert(start, replacement);
@@ -166,6 +167,7 @@ impl SpellExt for Editor {
                         current_idx = end;
                     }
                 } else if !choice.is_empty() {
+                    self.snapshot();
                     self.buffer.remove(start..end);
                     self.buffer.insert(start, &choice);
                     current_idx = start + choice.chars().count();

@@ -114,14 +114,17 @@ impl UiExt for Editor {
 
         let file_section = format!("{}", file_display_string);
 
-        let right_indicator_len = if self.is_modified { "[ Modified ]".len() } else { 0 };
-        let max_allowable_len = (cols as usize).saturating_sub(right_indicator_len);
-        let full_len = title.chars().count() + file_section.chars().count();
+        // --- NEW TITLE BAR LOGIC ---
+        let mod_star = if self.is_modified { "*" } else { "" };
+        let indicators_len = 4; // Space for " S L"
 
-        // truncate only the file path overflows
+        let max_allowable_len = (cols as usize).saturating_sub(indicators_len);
+        let full_len = title.chars().count() + file_section.chars().count() + mod_star.chars().count();
+
+        // truncate only if the file path overflows, making room for the asterisk
         let mut final_file_section = file_section.clone();
         if full_len > max_allowable_len {
-            let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count());
+            let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count() + mod_star.chars().count());
             if allowed_file_len > 3 {
                 final_file_section = file_section.chars().take(allowed_file_len.saturating_sub(3)).collect();
                 final_file_section.push_str("...");
@@ -130,39 +133,141 @@ impl UiExt for Editor {
             }
         }
 
-        let printed_left_len = title.chars().count() + final_file_section.chars().count();
+        let printed_left_len = title.chars().count() + final_file_section.chars().count() + mod_star.chars().count();
+        let pad2_len = (cols as usize).saturating_sub(printed_left_len + indicators_len);
+        let pad2 = " ".repeat(pad2_len);
 
-        if self.is_modified {
-            let right = "[ Modified ]";
-            let pad2_len = (cols as usize).saturating_sub(printed_left_len + right.len());
-            let pad2 = " ".repeat(pad2_len);
+        // Define our toggle indicator colors
+        let inactive_color = Color::Rgb { r: 128, g: 128, b: 128 }; // Muted grey
+        let s_color = if self.soft_wrap { colors.indicator } else { inactive_color };
+        let l_color = if self.show_line_numbers { colors.indicator } else { inactive_color };
 
-            queue!(
-                stdout,
-                SetForegroundColor(menu_key_fg),
-                Print(&title),
-                SetForegroundColor(menu_key_fg),
-                Print(&final_file_section),
-                Print(pad2),
-                SetForegroundColor(menu_key_fg),
-                Print(right),
-                SetForegroundColor(Color::Reset),
-                SetBackgroundColor(Color::Reset)
-            )?;
-        } else {
-            let pad2_len = (cols as usize).saturating_sub(printed_left_len);
-            let pad2 = " ".repeat(pad2_len);
-            queue!(
-                stdout,
-                SetForegroundColor(menu_key_fg),
-                Print(&title),
-                SetForegroundColor(menu_key_fg),
-                Print(&final_file_section),
-                Print(pad2),
-                SetForegroundColor(Color::Reset),
-                SetBackgroundColor(Color::Reset)
-            )?;
-        }
+        queue!(
+            stdout,
+            SetForegroundColor(menu_key_fg),
+            Print(&title),
+            Print(&final_file_section),
+            // Print the modification star in our standout color
+            SetForegroundColor(colors.indicator),
+            Print(mod_star),
+            Print(pad2),
+            // Print the right-aligned indicators
+            Print(" "),
+            SetForegroundColor(s_color),
+            Print("S"),
+            SetForegroundColor(inactive_color), // Color for the space between
+            Print(" "),
+            SetForegroundColor(l_color),
+            Print("L"),
+            // Reset colors for the rest of the screen
+            SetForegroundColor(Color::Reset),
+            SetBackgroundColor(Color::Reset)
+        )?;
+        // ---------------------------
+
+        // let mod_str = if self.is_modified { "[ Modified ]" } else { "" };
+        // let indicators_len = 4; // Space for " S L"
+        // let right_total_len = mod_str.len() + indicators_len;
+        //
+        // let max_allowable_len = (cols as usize).saturating_sub(right_total_len);
+        // let full_len = title.chars().count() + file_section.chars().count();
+        //
+        // // truncate only if the file path overflows
+        // let mut final_file_section = file_section.clone();
+        // if full_len > max_allowable_len {
+        //     let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count());
+        //     if allowed_file_len > 3 {
+        //         final_file_section = file_section.chars().take(allowed_file_len.saturating_sub(3)).collect();
+        //         final_file_section.push_str("...");
+        //     } else {
+        //         final_file_section = String::new();
+        //     }
+        // }
+        //
+        // let printed_left_len = title.chars().count() + final_file_section.chars().count();
+        // let pad2_len = (cols as usize).saturating_sub(printed_left_len + right_total_len);
+        // let pad2 = " ".repeat(pad2_len);
+        //
+        // // Define our toggle indicator colors
+        // // Define our toggle indicator colors
+        // let inactive_color = Color::Rgb { r: 128, g: 128, b: 128 }; // Muted grey
+        // let s_color = if self.soft_wrap { colors.indicator } else { inactive_color };
+        // let l_color = if self.show_line_numbers { colors.indicator } else { inactive_color };
+        // // let inactive_color = Color::Rgb { r: 128, g: 128, b: 128 }; // Muted grey
+        // // let s_color = if self.soft_wrap { menu_key_fg } else { inactive_color };
+        // // let l_color = if self.show_line_numbers { menu_key_fg } else { inactive_color };
+        //
+        // queue!(
+        //     stdout,
+        //     SetForegroundColor(menu_key_fg),
+        //     Print(&title),
+        //     SetForegroundColor(menu_key_fg),
+        //     Print(&final_file_section),
+        //     Print(pad2),
+        //     SetForegroundColor(menu_key_fg),
+        //     Print(mod_str),
+        //     // Print the new indicators
+        //     Print(" "),
+        //     SetForegroundColor(s_color),
+        //     Print("S"),
+        //     Print(" "),
+        //     SetForegroundColor(l_color),
+        //     Print("L"),
+        //     // Reset colors for the rest of the screen
+        //     SetForegroundColor(Color::Reset),
+        //     SetBackgroundColor(Color::Reset)
+        // )?;
+        // // ---------------------------
+
+        // let right_indicator_len = if self.is_modified { "[ Modified ]".len() } else { 0 };
+        // let max_allowable_len = (cols as usize).saturating_sub(right_indicator_len);
+        // let full_len = title.chars().count() + file_section.chars().count();
+        //
+        // // truncate only the file path overflows
+        // let mut final_file_section = file_section.clone();
+        // if full_len > max_allowable_len {
+        //     let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count());
+        //     if allowed_file_len > 3 {
+        //         final_file_section = file_section.chars().take(allowed_file_len.saturating_sub(3)).collect();
+        //         final_file_section.push_str("...");
+        //     } else {
+        //         final_file_section = String::new();
+        //     }
+        // }
+        //
+        // let printed_left_len = title.chars().count() + final_file_section.chars().count();
+        //
+        // if self.is_modified {
+        //     let right = "[ Modified ]";
+        //     let pad2_len = (cols as usize).saturating_sub(printed_left_len + right.len());
+        //     let pad2 = " ".repeat(pad2_len);
+        //
+        //     queue!(
+        //         stdout,
+        //         SetForegroundColor(menu_key_fg),
+        //         Print(&title),
+        //         SetForegroundColor(menu_key_fg),
+        //         Print(&final_file_section),
+        //         Print(pad2),
+        //         SetForegroundColor(menu_key_fg),
+        //         Print(right),
+        //         SetForegroundColor(Color::Reset),
+        //         SetBackgroundColor(Color::Reset)
+        //     )?;
+        // } else {
+        //     let pad2_len = (cols as usize).saturating_sub(printed_left_len);
+        //     let pad2 = " ".repeat(pad2_len);
+        //     queue!(
+        //         stdout,
+        //         SetForegroundColor(menu_key_fg),
+        //         Print(&title),
+        //         SetForegroundColor(menu_key_fg),
+        //         Print(&final_file_section),
+        //         Print(pad2),
+        //         SetForegroundColor(Color::Reset),
+        //         SetBackgroundColor(Color::Reset)
+        //     )?;
+        // }
 
         let syntax = if let Some(ref name) = self.filename {
             let path = std::path::Path::new(name);
@@ -461,23 +566,19 @@ impl UiExt for Editor {
         match self.menu_state {
             MenuState::Menu1 => {
                 let menu1 = [
-                    ("^O", " Write Out"), ("^R", " Read File"), ("^C", " Cur Pos"), ("^K", " Cut Txt"), ("^J", " Justify"), ("M+O", " Other 1/3") // Updated
+                    ("^O", " Write Out"), ("^R", " Read File"), ("^C", " Cur Pos"), ("^K", " Cut Txt"), ("^J", " Justify"), ("M+O", " Other 1/4") // Updated
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
-
-                let u_label = if self.is_justified { " Unjustify" } else { " UnCut Txt" };
-
                 let menu2 = [
-                    ("^X", " Exit"), ("^W", " Where Is"), ("^L", " To Line"), ("^U", u_label), ("^T", " To Spell"), (" ^H", " Help")
+                    ("^X", " Exit"), ("^W", " Where Is"), ("^L", " To Line"), ("^U", " UnCut Txt"), ("^T", " To Spell"), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
-            MenuState::Menu2 => { // NEW PAGE BLOCK
+            MenuState::Menu2 => {
                 let menu1 = [
-                    ("^P", " Prv Lne"), ("^Y", " Prev Pg"), ("^B", " Back Chr"), ("M+B", " Back Wrd"), ("^A", " Beg Line"), ("M+O", " Other 2/3")
+                    ("^P", " Prv Lne"), ("^Y", " Prev Pg"), ("^B", " Back Chr"), ("M+B", " Back Wrd"), ("^A", " Beg Line"), ("M+O", " Other 2/4") // Updated
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
-
                 let menu2 = [
                     ("^N", " Nxt Line"), ("^V", " Next Pg"), ("^F", " Frwd Chr"), ("M+F", " Frwd Wrd"), ("^E", " End Line"), (" ^H", " Help")
                 ];
@@ -485,15 +586,58 @@ impl UiExt for Editor {
             }
             MenuState::Menu3 => {
                 let menu1 = [
-                    ("^\\", " Replace"), ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 3/3") // Updated
+                    ("^\\", " Replace"), ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 3/4") // Updated
+                ];
+                Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
+                let menu2 = [
+                    ("^D", " Delete"), ("M+A", " Mark Beg"), ("M+V", " Update"), ("M+L", " Line Num"), ("M+.", " Next Mrk"), (" ^H", " Help")
+                ];
+                Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
+            }
+            MenuState::Menu4 => {
+                let menu1 = [
+                    ("M+U", " Undo"), ("M+R", " Redo"), ("", ""), ("", ""), ("", ""), ("M+O", " Other 4/4")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
                 let menu2 = [
-                    ("^D", " Delete"), ("M+A", " Mark Beg"), ("M+U", " Update"), ("M+L", " Line Num"), ("M+.", " Next Mrk"), (" ^H", " Help")
+                    ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
+            // MenuState::Menu1 => {
+            //     let menu1 = [
+            //         ("^O", " Write Out"), ("^R", " Read File"), ("^C", " Cur Pos"), ("^K", " Cut Txt"), ("^J", " Justify"), ("M+O", " Other 1/3") // Updated
+            //     ];
+            //     Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
+            //
+            //     let menu2 = [
+            //         ("^X", " Exit"), ("^W", " Where Is"), ("^L", " To Line"), ("^U", " UnCut Txt"), ("^T", " To Spell"), (" ^H", " Help")
+            //     ];
+            //     Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
+            // }
+            // MenuState::Menu2 => { // NEW PAGE BLOCK
+            //     let menu1 = [
+            //         ("^P", " Prv Lne"), ("^Y", " Prev Pg"), ("^B", " Back Chr"), ("M+B", " Back Wrd"), ("^A", " Beg Line"), ("M+O", " Other 2/3")
+            //     ];
+            //     Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
+            //
+            //     let menu2 = [
+            //         ("^N", " Nxt Line"), ("^V", " Next Pg"), ("^F", " Frwd Chr"), ("M+F", " Frwd Wrd"), ("^E", " End Line"), (" ^H", " Help")
+            //     ];
+            //     Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
+            // }
+            // MenuState::Menu3 => {
+            //     let menu1 = [
+            //         ("^\\", " Replace"), ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 3/3") // Updated
+            //     ];
+            //     Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
+            //
+            //     let menu2 = [
+            //         ("^D", " Delete"), ("M+A", " Mark Beg"), ("M+V", " Update"), ("M+L", " Line Num"), ("M+.", " Next Mrk"), (" ^H", " Help")
+            //     ];
+            //     Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
+            // }
 
             MenuState::YesNoCancel => {
                 let menu1 = [(" Y", " Yes")];
@@ -658,7 +802,11 @@ impl UiExt for Editor {
     }
 
     fn prompt(&mut self, prompt_text: &str, allow_browser: bool) -> io::Result<Option<String>> {
-        if self.menu_state == MenuState::Menu1 || self.menu_state == MenuState::Menu2 {
+        if self.menu_state == MenuState::Menu1
+            || self.menu_state == MenuState::Menu2
+            || self.menu_state == MenuState::Menu3
+            || self.menu_state == MenuState::Menu4
+        {
             self.menu_state = if allow_browser { MenuState::PromptWithBrowser } else { MenuState::CancelOnly };
         }
 
@@ -735,89 +883,202 @@ impl UiExt for Editor {
 
             stdout.flush()?;
 
-            if let Event::Key(key) = event::read()? {
-                if key.kind != event::KeyEventKind::Press {
-                    continue;
-                }
-                match key.code {
-                    KeyCode::Enter => {
-                        if is_save_prompt && !input.is_empty() {
-                            let mut target = std::path::PathBuf::from(&input);
-
-                            if let Some(ref fname) = self.filename {
-                                let orig_path = std::path::Path::new(fname);
-                                if let Some(parent) = orig_path.parent() {
-                                    // if user typed a new path like /tmp/file.txt, do not change
-                                    if target.components().count() == 1 {
-                                        target = parent.join(&input);
-                                        input = target.to_string_lossy().into_owned();
+            let ev = event::read()?;
+            match ev {
+                Event::Key(key) => {
+                    if key.kind != event::KeyEventKind::Press {
+                        continue;
+                    }
+                    match key.code {
+                        KeyCode::Enter => {
+                            if is_save_prompt && !input.is_empty() {
+                                let mut target = std::path::PathBuf::from(&input);
+                                if let Some(ref fname) = self.filename {
+                                    let orig_path = std::path::Path::new(fname);
+                                    if let Some(parent) = orig_path.parent() {
+                                        // if user typed a new path like /tmp/file.txt, do not change
+                                        if target.components().count() == 1 {
+                                            target = parent.join(&input);
+                                            input = target.to_string_lossy().into_owned();
+                                        }
+                                    }
+                                }
+                                if let Some(parent) = target.parent() {
+                                    // if directory doesn't exist, throw error
+                                    if !parent.as_os_str().is_empty() && !parent.exists() {
+                                        self.set_status(String::from("File not saved. Directory does not exist."));
+                                        self.menu_state = MenuState::Menu1;
+                                        return Ok(None);
                                     }
                                 }
                             }
+                            self.clear_status();
+                            self.menu_state = MenuState::Menu1;
+                            return Ok(Some(input));
+                        }
+                        KeyCode::Esc => {
+                            self.set_status(String::from("Cancelled."));
+                            self.menu_state = MenuState::Menu1;
+                            return Ok(None);
+                        }
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            self.set_status(String::from("Cancelled."));
+                            self.menu_state = MenuState::Menu1;
+                            return Ok(None);
+                        }
+                        KeyCode::Char('t') if allow_browser && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if let Some(selected_path) = self.run_file_browser()? {
+                                self.clear_status();
+                                self.menu_state = MenuState::Menu1;
+                                return Ok(Some(selected_path));
+                            }
+                            self.menu_state = MenuState::PromptWithBrowser;
+                        }
+                        KeyCode::Left => cursor_idx = cursor_idx.saturating_sub(1),
+                        KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => cursor_idx = cursor_idx.saturating_sub(1),
+                        KeyCode::Right => {
+                            if cursor_idx < chars.len() { cursor_idx += 1; }
+                        }
+                        KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if cursor_idx < chars.len() { cursor_idx += 1; }
+                        }
+                        KeyCode::Backspace => {
+                            if cursor_idx > 0 {
+                                cursor_idx -= 1;
+                                chars.remove(cursor_idx);
+                            }
+                        }
+                        KeyCode::Delete => {
+                            if cursor_idx < chars.len() {
+                                chars.remove(cursor_idx);
+                            }
+                        }
+                        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if cursor_idx < chars.len() {
+                                chars.remove(cursor_idx);
+                            }
+                        }
+                        KeyCode::Char(c) if !c.is_control() => {
+                            chars.insert(cursor_idx, c);
+                            cursor_idx += 1;
+                        }
+                        _ => {}
+                    }
+                }
+                Event::Mouse(mouse) => {
+                    if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
+                        let (cols, rows) = terminal::size()?;
 
-                            if let Some(parent) = target.parent() {
-                                // if directory doesn't exist, throw error
-                                if !parent.as_os_str().is_empty() && !parent.exists() {
-                                    self.set_status(String::from("File not saved. Directory does not exist."));
+                        // Check if the user clicked the bottom two rows
+                        if mouse.row >= rows - 2 {
+                            let is_top = mouse.row == rows - 2;
+                            let col_width = (cols as usize) / 6;
+                            let col_idx = (mouse.column as usize) / col_width;
+
+                            if col_idx == 0 {
+                                if is_top && allow_browser {
+                                    // Trigger File Browser (^T)
+                                    if let Some(selected_path) = self.run_file_browser()? {
+                                        self.clear_status();
+                                        self.menu_state = MenuState::Menu1;
+                                        return Ok(Some(selected_path));
+                                    }
+                                    self.menu_state = MenuState::PromptWithBrowser;
+                                } else if !is_top {
+                                    // Trigger Cancel (^C)
+                                    self.set_status(String::from("Cancelled."));
                                     self.menu_state = MenuState::Menu1;
                                     return Ok(None);
                                 }
                             }
                         }
-
-                        self.clear_status();
-                        self.menu_state = MenuState::Menu1;
-                        return Ok(Some(input));
                     }
-                    KeyCode::Esc => {
-                        self.set_status(String::from("Cancelled."));
-                        self.menu_state = MenuState::Menu1;
-                        return Ok(None);
-                    }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.set_status(String::from("Cancelled."));
-                        self.menu_state = MenuState::Menu1;
-                        return Ok(None);
-                    }
-                    KeyCode::Char('t') if allow_browser && key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        if let Some(selected_path) = self.run_file_browser()? {
-                            self.clear_status();
-                            self.menu_state = MenuState::Menu1;
-                            return Ok(Some(selected_path));
-                        }
-                        self.menu_state = MenuState::PromptWithBrowser;
-                    }
-                    KeyCode::Left => cursor_idx = cursor_idx.saturating_sub(1),
-                    KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => cursor_idx = cursor_idx.saturating_sub(1),
-                    KeyCode::Right => {
-                        if cursor_idx < chars.len() { cursor_idx += 1; }
-                    }
-                    KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        if cursor_idx < chars.len() { cursor_idx += 1; }
-                    }
-                    KeyCode::Backspace => {
-                        if cursor_idx > 0 {
-                            cursor_idx -= 1;
-                            chars.remove(cursor_idx);
-                        }
-                    }
-                    KeyCode::Delete => {
-                        if cursor_idx < chars.len() {
-                            chars.remove(cursor_idx);
-                        }
-                    }
-                    KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        if cursor_idx < chars.len() {
-                            chars.remove(cursor_idx);
-                        }
-                    }
-                    KeyCode::Char(c) if !c.is_control() => {
-                        chars.insert(cursor_idx, c);
-                        cursor_idx += 1;
-                    }
-                    _ => {}
                 }
+                _ => {}
             }
+            // if let Event::Key(key) = event::read()? {
+            //     if key.kind != event::KeyEventKind::Press {
+            //         continue;
+            //     }
+            //     match key.code {
+            //         KeyCode::Enter => {
+            //             if is_save_prompt && !input.is_empty() {
+            //                 let mut target = std::path::PathBuf::from(&input);
+            //
+            //                 if let Some(ref fname) = self.filename {
+            //                     let orig_path = std::path::Path::new(fname);
+            //                     if let Some(parent) = orig_path.parent() {
+            //                         // if user typed a new path like /tmp/file.txt, do not change
+            //                         if target.components().count() == 1 {
+            //                             target = parent.join(&input);
+            //                             input = target.to_string_lossy().into_owned();
+            //                         }
+            //                     }
+            //                 }
+            //
+            //                 if let Some(parent) = target.parent() {
+            //                     // if directory doesn't exist, throw error
+            //                     if !parent.as_os_str().is_empty() && !parent.exists() {
+            //                         self.set_status(String::from("File not saved. Directory does not exist."));
+            //                         self.menu_state = MenuState::Menu1;
+            //                         return Ok(None);
+            //                     }
+            //                 }
+            //             }
+            //
+            //             self.clear_status();
+            //             self.menu_state = MenuState::Menu1;
+            //             return Ok(Some(input));
+            //         }
+            //         KeyCode::Esc => {
+            //             self.set_status(String::from("Cancelled."));
+            //             self.menu_state = MenuState::Menu1;
+            //             return Ok(None);
+            //         }
+            //         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            //             self.set_status(String::from("Cancelled."));
+            //             self.menu_state = MenuState::Menu1;
+            //             return Ok(None);
+            //         }
+            //         KeyCode::Char('t') if allow_browser && key.modifiers.contains(KeyModifiers::CONTROL) => {
+            //             if let Some(selected_path) = self.run_file_browser()? {
+            //                 self.clear_status();
+            //                 self.menu_state = MenuState::Menu1;
+            //                 return Ok(Some(selected_path));
+            //             }
+            //             self.menu_state = MenuState::PromptWithBrowser;
+            //         }
+            //         KeyCode::Left => cursor_idx = cursor_idx.saturating_sub(1),
+            //         KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => cursor_idx = cursor_idx.saturating_sub(1),
+            //         KeyCode::Right => {
+            //             if cursor_idx < chars.len() { cursor_idx += 1; }
+            //         }
+            //         KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            //             if cursor_idx < chars.len() { cursor_idx += 1; }
+            //         }
+            //         KeyCode::Backspace => {
+            //             if cursor_idx > 0 {
+            //                 cursor_idx -= 1;
+            //                 chars.remove(cursor_idx);
+            //             }
+            //         }
+            //         KeyCode::Delete => {
+            //             if cursor_idx < chars.len() {
+            //                 chars.remove(cursor_idx);
+            //             }
+            //         }
+            //         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            //             if cursor_idx < chars.len() {
+            //                 chars.remove(cursor_idx);
+            //             }
+            //         }
+            //         KeyCode::Char(c) if !c.is_control() => {
+            //             chars.insert(cursor_idx, c);
+            //             cursor_idx += 1;
+            //         }
+            //         _ => {}
+            //     }
+            // }
         }
     }
 
@@ -885,37 +1146,76 @@ impl UiExt for Editor {
             queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
             stdout.flush()?;
 
-            if let Event::Key(key) = event::read()? {
-                if key.kind != event::KeyEventKind::Press {
-                    continue;
+            let ev = event::read()?;
+            match ev {
+                Event::Key(key) => {
+                    if key.kind != event::KeyEventKind::Press { continue; }
+                    match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => { self.clear_status(); result = Some('y'); break; }
+                        KeyCode::Char('n') | KeyCode::Char('N') => { self.clear_status(); result = Some('n'); break; }
+                        KeyCode::Char('a') | KeyCode::Char('A') => { self.clear_status(); result = Some('a'); break; }
+                        KeyCode::Esc => { self.set_status(String::from("Cancelled")); break; }
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => { self.set_status(String::from("Cancelled")); break; }
+                        _ => {}
+                    }
                 }
-                match key.code {
-                    KeyCode::Char('y') | KeyCode::Char('Y') => {
-                        self.clear_status();
-                        result = Some('y');
-                        break;
+                Event::Mouse(mouse) => {
+                    if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
+                        let (cols, rows) = terminal::size()?;
+                        if mouse.row >= rows - 2 {
+                            let is_top = mouse.row == rows - 2;
+                            let col_width = (cols as usize) / 6;
+                            let col_idx = (mouse.column as usize) / col_width;
+
+                            if is_top {
+                                match col_idx {
+                                    0 => { self.clear_status(); result = Some('y'); break; } // Y Yes
+                                    1 => { self.clear_status(); result = Some('a'); break; } // A All
+                                    _ => {}
+                                }
+                            } else {
+                                match col_idx {
+                                    0 => { self.clear_status(); result = Some('n'); break; } // N No
+                                    1 => { self.set_status(String::from("Cancelled")); break; } // ^C Cancel
+                                    _ => {}
+                                }
+                            }
+                        }
                     }
-                    KeyCode::Char('n') | KeyCode::Char('N') => {
-                        self.clear_status();
-                        result = Some('n');
-                        break;
-                    }
-                    KeyCode::Char('a') | KeyCode::Char('A') => {
-                        self.clear_status();
-                        result = Some('a');
-                        break;
-                    }
-                    KeyCode::Esc => {
-                        self.set_status(String::from("Cancelled"));
-                        break;
-                    }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.set_status(String::from("Cancelled"));
-                        break;
-                    }
-                    _ => {}
                 }
+                _ => {}
             }
+            // if let Event::Key(key) = event::read()? {
+            //     if key.kind != event::KeyEventKind::Press {
+            //         continue;
+            //     }
+            //     match key.code {
+            //         KeyCode::Char('y') | KeyCode::Char('Y') => {
+            //             self.clear_status();
+            //             result = Some('y');
+            //             break;
+            //         }
+            //         KeyCode::Char('n') | KeyCode::Char('N') => {
+            //             self.clear_status();
+            //             result = Some('n');
+            //             break;
+            //         }
+            //         KeyCode::Char('a') | KeyCode::Char('A') => {
+            //             self.clear_status();
+            //             result = Some('a');
+            //             break;
+            //         }
+            //         KeyCode::Esc => {
+            //             self.set_status(String::from("Cancelled"));
+            //             break;
+            //         }
+            //         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            //             self.set_status(String::from("Cancelled"));
+            //             break;
+            //         }
+            //         _ => {}
+            //     }
+            // }
         }
 
         self.menu_state = MenuState::Menu1;
@@ -1071,87 +1371,146 @@ impl UiExt for Editor {
 
                 stdout.flush()?;
 
-                if let Event::Key(key) = event::read()? {
-                    if key.kind != event::KeyEventKind::Press {
-                        continue;
+                let ev = event::read()?;
+                let mut trigger_enter = false;
+
+                match ev {
+                    Event::Key(key) => {
+                        if key.kind != event::KeyEventKind::Press {
+                            continue;
+                        }
+                        match key.code {
+                            KeyCode::Esc => return Ok(None),
+                            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(None),
+                            KeyCode::Up => {
+                                selected = selected.saturating_sub(1);
+                            }
+                            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                selected = selected.saturating_sub(1);
+                            }
+                            KeyCode::Down => {
+                                if selected + 1 < entries.len() {
+                                    selected += 1;
+                                }
+                            }
+                            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                if selected + 1 < entries.len() {
+                                    selected += 1;
+                                }
+                            }
+                            KeyCode::PageUp | KeyCode::F(7) => {
+                                selected = selected.saturating_sub(visible_rows);
+                            }
+                            KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                selected = selected.saturating_sub(visible_rows);
+                            }
+                            KeyCode::PageDown | KeyCode::F(8) => {
+                                let max_offset = entries.len().saturating_sub(1);
+                                selected = (selected + visible_rows).min(max_offset);
+                            }
+                            KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                let max_offset = entries.len().saturating_sub(1);
+                                selected = (selected + visible_rows).min(max_offset);
+                            }
+                            KeyCode::Enter => {
+                                trigger_enter = true;
+                            }
+                            _ => {}
+                        }
                     }
-                    match key.code {
-                        KeyCode::Esc => return Ok(None),
-                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(None),
-                        KeyCode::Up => {
-                            selected = selected.saturating_sub(1);
-                        }
-                        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            selected = selected.saturating_sub(1);
-                        }
-                        KeyCode::Down => {
-                            if selected + 1 < entries.len() {
-                                selected += 1;
+                    Event::Mouse(mouse) => {
+                        match mouse.kind {
+                            event::MouseEventKind::ScrollUp => {
+                                selected = selected.saturating_sub(1);
                             }
-                        }
-                        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            if selected + 1 < entries.len() {
-                                selected += 1;
+                            event::MouseEventKind::ScrollDown => {
+                                if selected + 1 < entries.len() {
+                                    selected += 1;
+                                }
                             }
-                        }
-                        KeyCode::PageUp | KeyCode::F(7) => {
-                            selected = selected.saturating_sub(visible_rows);
-                        }
-                        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            selected = selected.saturating_sub(visible_rows);
-                        }
-                        KeyCode::PageDown | KeyCode::F(8) => {
-                            let max_offset = entries.len().saturating_sub(1);
-                            selected = (selected + visible_rows).min(max_offset);
-                        }
-                        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            let max_offset = entries.len().saturating_sub(1);
-                            selected = (selected + visible_rows).min(max_offset);
-                        }
-                        KeyCode::Enter => {
-                            let (name, is_dir) = &entries[selected];
-                            if *is_dir {
-                                if name == "." {
-                                    let mut prefill = current_dir.to_string_lossy().into_owned();
-                                    if !prefill.ends_with(std::path::MAIN_SEPARATOR) {
-                                        prefill.push(std::path::MAIN_SEPARATOR);
-                                    }
+                            event::MouseEventKind::Down(event::MouseButton::Left) => {
+                                let (cols, rows) = terminal::size()?;
+                                let visible_rows = rows.saturating_sub(3) as usize;
 
-                                    // pass the prefill string to inline_prompt
-                                    if let Some(input) = self.inline_prompt("File name to write: ", &prefill)? {
-                                        let target = std::path::PathBuf::from(&input);
+                                // 1. Menu Clicks
+                                if mouse.row >= rows - 2 {
+                                    let is_top = mouse.row == rows - 2;
+                                    let col_width = (cols as usize) / 6;
+                                    let col_idx = (mouse.column as usize) / col_width;
 
-                                        // validate that the edited path is valid
-                                        if let Some(parent) = target.parent() {
-                                            if !parent.as_os_str().is_empty() && !parent.exists() {
-                                                self.set_status(String::from("File not saved. Directory does not exist."));
-                                                return Ok(None); // Cancels save and returns to the editor with the error
+                                    if col_idx < 6 {
+                                        if is_top && col_idx == 1 {
+                                            // ^Y Prev Pg
+                                            selected = selected.saturating_sub(visible_rows);
+                                        } else if !is_top {
+                                            match col_idx {
+                                                0 => return Ok(None), // ^C Cancel
+                                                1 => { // ^V Next Pg
+                                                    let max_offset = entries.len().saturating_sub(1);
+                                                    selected = (selected + visible_rows).min(max_offset);
+                                                }
+                                                2 => trigger_enter = true, // Enter Select
+                                                _ => {}
                                             }
                                         }
-
-                                        // return file path
-                                        return Ok(Some(input));
-                                    }
-                                    continue; // if escape or canceled, go back to the browser
-                                } else if name == ".." {
-                                    if let Some(parent) = current_dir.parent() {
-                                        current_dir = parent.to_path_buf();
-                                    }
-                                } else {
-                                    current_dir = current_dir.join(name);
-                                    if let Ok(canon) = current_dir.canonicalize() {
-                                        current_dir = canon;
                                     }
                                 }
-                                selected = 0;
-                                scroll = 0;
-                                break;
-                            } else {
-                                let target = current_dir.join(name);
-                                return Ok(Some(target.to_string_lossy().into_owned()));
+                                // 2. File List Clicks
+                                else if mouse.row > 0 && (mouse.row as usize) <= visible_rows {
+                                    let clicked_idx = scroll + (mouse.row as usize) - 1;
+                                    if clicked_idx < entries.len() {
+                                        if selected == clicked_idx {
+                                            // Act as a double-click if it's already selected
+                                            trigger_enter = true;
+                                        } else {
+                                            selected = clicked_idx;
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+
+                if trigger_enter {
+                    let (name, is_dir) = &entries[selected];
+                    if *is_dir {
+                        if name == "." {
+                            let mut prefill = current_dir.to_string_lossy().into_owned();
+                            if !prefill.ends_with(std::path::MAIN_SEPARATOR) {
+                                prefill.push(std::path::MAIN_SEPARATOR);
+                            }
+                            // pass the prefill string to inline_prompt
+                            if let Some(input) = self.inline_prompt("File name to write: ", &prefill)? {
+                                let target = std::path::PathBuf::from(&input);
+                                // validate that the edited path is valid
+                                if let Some(parent) = target.parent() {
+                                    if !parent.as_os_str().is_empty() && !parent.exists() {
+                                        self.set_status(String::from("File not saved. Directory does not exist."));
+                                        return Ok(None);
+                                    }
+                                }
+                                return Ok(Some(input));
+                            }
+                            continue; // if escape or canceled, go back to the browser
+                        } else if name == ".." {
+                            if let Some(parent) = current_dir.parent() {
+                                current_dir = parent.to_path_buf();
+                            }
+                        } else {
+                            current_dir = current_dir.join(name);
+                            if let Ok(canon) = current_dir.canonicalize() {
+                                current_dir = canon;
                             }
                         }
-                        _ => {}
+                        selected = 0;
+                        scroll = 0;
+                        break;
+                    } else {
+                        let target = current_dir.join(name);
+                        return Ok(Some(target.to_string_lossy().into_owned()));
                     }
                 }
             }
@@ -1182,8 +1541,13 @@ impl UiExt for Editor {
             "    M+F, M+Right, ^Right  Move right/forward one word",
             "    ^A                    Move to start of line",
             "    ^E                    Move to end of line",
+            "   M+M                    Mark current line",
+            "   M+,                    Move to previous mark",
+            "   M+.                    Move to next mark",
             "",
             "  Editing:",
+            "    M+U                   Undo last action",
+            "    M+R                   Redo last undone action",
             "    ^K, F9     Cut current line into clipboard",
             "    ^U, F10    Paste contents of clipboard",
             "    ^D, Del    Delete character under cursor",
@@ -1314,48 +1678,132 @@ impl UiExt for Editor {
 
             stdout.flush()?;
 
-            if let Event::Key(key) = event::read()? {
-                if key.kind != event::KeyEventKind::Press {
-                    continue;
-                }
-                match key.code {
-                    KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-                    KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-                    KeyCode::F(2) => break,
-                    KeyCode::Esc => break,
-                    KeyCode::Up => {
-                        scroll_offset = scroll_offset.saturating_sub(1);
+            let ev = event::read()?;
+            match ev {
+                Event::Key(key) => {
+                    if key.kind != event::KeyEventKind::Press {
+                        continue;
                     }
-                    KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        scroll_offset = scroll_offset.saturating_sub(1);
-                    }
-                    KeyCode::Down => {
-                        if scroll_offset + visible_rows < help_lines.len() {
-                            scroll_offset += 1;
+                    match key.code {
+                        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                        KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                        KeyCode::F(2) => break,
+                        KeyCode::Esc => break,
+                        KeyCode::Up => {
+                            scroll_offset = scroll_offset.saturating_sub(1);
                         }
-                    }
-                    KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        if scroll_offset + visible_rows < help_lines.len() {
-                            scroll_offset += 1;
+                        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            scroll_offset = scroll_offset.saturating_sub(1);
                         }
+                        KeyCode::Down => {
+                            if scroll_offset + visible_rows < help_lines.len() {
+                                scroll_offset += 1;
+                            }
+                        }
+                        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if scroll_offset + visible_rows < help_lines.len() {
+                                scroll_offset += 1;
+                            }
+                        }
+                        KeyCode::PageUp | KeyCode::F(7) => {
+                            scroll_offset = scroll_offset.saturating_sub(visible_rows);
+                        }
+                        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            scroll_offset = scroll_offset.saturating_sub(visible_rows);
+                        }
+                        KeyCode::PageDown | KeyCode::F(8) => {
+                            let max_offset = help_lines.len().saturating_sub(visible_rows);
+                            scroll_offset = (scroll_offset + visible_rows).min(max_offset);
+                        }
+                        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            let max_offset = help_lines.len().saturating_sub(visible_rows);
+                            scroll_offset = (scroll_offset + visible_rows).min(max_offset);
+                        }
+                        _ => {}
                     }
-                    KeyCode::PageUp | KeyCode::F(7) => {
-                        scroll_offset = scroll_offset.saturating_sub(visible_rows);
-                    }
-                    KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        scroll_offset = scroll_offset.saturating_sub(visible_rows);
-                    }
-                    KeyCode::PageDown | KeyCode::F(8) => {
-                        let max_offset = help_lines.len().saturating_sub(visible_rows);
-                        scroll_offset = (scroll_offset + visible_rows).min(max_offset);
-                    }
-                    KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        let max_offset = help_lines.len().saturating_sub(visible_rows);
-                        scroll_offset = (scroll_offset + visible_rows).min(max_offset);
-                    }
-                    _ => {}
                 }
+                Event::Mouse(mouse) => {
+                    match mouse.kind {
+                        event::MouseEventKind::ScrollUp => {
+                            scroll_offset = scroll_offset.saturating_sub(3);
+                        }
+                        event::MouseEventKind::ScrollDown => {
+                            let max_offset = help_lines.len().saturating_sub(visible_rows);
+                            scroll_offset = (scroll_offset + 3).min(max_offset);
+                        }
+                        event::MouseEventKind::Down(event::MouseButton::Left) => {
+                            let (cols, rows) = terminal::size()?;
+
+                            // Check if the user clicked the bottom two rows
+                            if mouse.row >= rows - 2 {
+                                let is_top = mouse.row == rows - 2;
+                                let col_width = (cols as usize) / 6;
+                                let col_idx = (mouse.column as usize) / col_width;
+
+                                if is_top {
+                                    if col_idx == 1 {
+                                        // ^Y Prev Pg
+                                        scroll_offset = scroll_offset.saturating_sub(visible_rows);
+                                    }
+                                } else {
+                                    if col_idx == 0 {
+                                        // ^X Exit Help
+                                        break;
+                                    } else if col_idx == 1 {
+                                        // ^V Next Pg
+                                        let max_offset = help_lines.len().saturating_sub(visible_rows);
+                                        scroll_offset = (scroll_offset + visible_rows).min(max_offset);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
             }
+            // if let Event::Key(key) = event::read()? {
+            //     if key.kind != event::KeyEventKind::Press {
+            //         continue;
+            //     }
+            //     match key.code {
+            //         KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+            //         KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+            //         KeyCode::F(2) => break,
+            //         KeyCode::Esc => break,
+            //         KeyCode::Up => {
+            //             scroll_offset = scroll_offset.saturating_sub(1);
+            //         }
+            //         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            //             scroll_offset = scroll_offset.saturating_sub(1);
+            //         }
+            //         KeyCode::Down => {
+            //             if scroll_offset + visible_rows < help_lines.len() {
+            //                 scroll_offset += 1;
+            //             }
+            //         }
+            //         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            //             if scroll_offset + visible_rows < help_lines.len() {
+            //                 scroll_offset += 1;
+            //             }
+            //         }
+            //         KeyCode::PageUp | KeyCode::F(7) => {
+            //             scroll_offset = scroll_offset.saturating_sub(visible_rows);
+            //         }
+            //         KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            //             scroll_offset = scroll_offset.saturating_sub(visible_rows);
+            //         }
+            //         KeyCode::PageDown | KeyCode::F(8) => {
+            //             let max_offset = help_lines.len().saturating_sub(visible_rows);
+            //             scroll_offset = (scroll_offset + visible_rows).min(max_offset);
+            //         }
+            //         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            //             let max_offset = help_lines.len().saturating_sub(visible_rows);
+            //             scroll_offset = (scroll_offset + visible_rows).min(max_offset);
+            //         }
+            //         _ => {}
+            //     }
+            // }
         }
 
         self.clear_status();
