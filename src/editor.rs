@@ -23,7 +23,7 @@ use crate::config::ConfigExt;
 use crate::spell::SpellExt;
 use crate::ui::UiExt;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub(crate) enum MenuState {
     Menu1,
     Menu2,
@@ -798,6 +798,7 @@ impl Editor {
                     KeyCode::Char('r') if is_alt => self.redo(),
                     _ => { self.clear_status(); }
                 }
+                self.previous_action_was_cut = current_action_is_cut;
             }
             // --- NEW MOUSE LOGIC ---
             Event::Mouse(mouse) => {
@@ -835,13 +836,13 @@ impl Editor {
                                                 match col_idx {
                                                     0 => { self.save_file()?; } // ^O
                                                     1 => { self.read_file()?; } // ^R
-                                                    2 => { self.cur_pos(); }    // ^C
+                                                    2 => { self.justify(); }    // ^J
                                                     3 => {                      // ^K
                                                         self.cut_line();
                                                         self.previous_action_was_cut = true;
                                                         self.adjust_marks_on_delete(self.cursor_y);
                                                     }
-                                                    4 => { self.justify(); }    // ^J
+                                                    4 => { self.undo(); }       // M+U
                                                     5 => { self.menu_state = MenuState::Menu2; } // M+O
                                                     _ => {}
                                                 }
@@ -849,9 +850,9 @@ impl Editor {
                                                 match col_idx {
                                                     0 => { self.exit_editor()?; } // ^X
                                                     1 => { self.where_is()?; }    // ^W
-                                                    2 => { self.go_to_line()?; }  // ^L
+                                                    2 => { self.replace()?; }     // ^\
                                                     3 => { self.paste_line(); }   // ^U
-                                                    4 => { self.spell_check()?; } // ^T
+                                                    4 => { self.redo(); }         // M+R
                                                     5 => { self.show_help()?; }   // ^H
                                                     _ => {}
                                                 }
@@ -883,13 +884,9 @@ impl Editor {
                                         MenuState::Menu3 => {
                                             if is_top_row {
                                                 match col_idx {
-                                                    0 => { self.replace()?; }          // ^\
-                                                    1 => {                             // M+S
-                                                        self.soft_wrap = !self.soft_wrap;
-                                                        self.save_config();
-                                                        self.set_status(if self.soft_wrap { "Soft wrap enabled".into() } else { "Soft wrap disabled".into() });
-                                                    }
-                                                    2 => { self.cycle_theme(); }       // M+T
+                                                    0 => { self.cur_pos(); }      // ^C
+                                                    1 => { self.toggle_mark(); }  // M+A
+                                                    2 => { self.spell_check()?; } // ^T
                                                     3 => { self.toggle_line_mark(); }  // M+M
                                                     4 => { self.goto_prev_mark()?; }   // M+,
                                                     5 => { self.menu_state = MenuState::Menu4; } // M+O
@@ -897,21 +894,8 @@ impl Editor {
                                                 }
                                             } else {
                                                 match col_idx {
-                                                    0 => { self.delete_char(); }       // ^D
-                                                    1 => { self.toggle_mark(); }       // M+A
-                                                    2 => {                             // M+V
-                                                        if self.update_version.is_some() {
-                                                            let _ = webbrowser::open("https://github.com/mabognar/xnano/releases/latest");
-                                                            self.set_status(String::from("Opened browser to download update."));
-                                                        } else {
-                                                            self.set_status(String::from("xnano is the latest version"));
-                                                        }
-                                                    }
-                                                    3 => {                             // M+L
-                                                        self.show_line_numbers = !self.show_line_numbers;
-                                                        self.save_config();
-                                                        self.set_status(if self.show_line_numbers { "Line numbers enabled".into() } else { "Line numbers disabled".into() });
-                                                    }
+                                                    0 => { self.go_to_line()?; }       // ^L
+                                                    1 => { self.delete_char(); }       // ^D
                                                     4 => { self.goto_next_mark()?; }   // M+.
                                                     5 => { self.show_help()?; }        // ^H
                                                     _ => {}
@@ -921,13 +905,30 @@ impl Editor {
                                         MenuState::Menu4 => {
                                             if is_top_row {
                                                 match col_idx {
-                                                    0 => { self.undo(); }              // M+U
-                                                    1 => { self.redo(); }              // M+R
-                                                    5 => { self.menu_state = MenuState::Menu1; } // M+O
+                                                    0 => {                                         // M+S
+                                                        self.soft_wrap = !self.soft_wrap;
+                                                        self.save_config();
+                                                        self.set_status(if self.soft_wrap { "Soft wrap enabled".into() } else { "Soft wrap disabled".into() });
+                                                    }
+                                                    1 => { self.cycle_theme(); }           // M+T
+                                                    5 => { self.menu_state = MenuState::Menu1; }   // M+O
                                                     _ => {}
                                                 }
                                             } else {
                                                 match col_idx {
+                                                    0 => {                             // M+L
+                                                        self.show_line_numbers = !self.show_line_numbers;
+                                                        self.save_config();
+                                                        self.set_status(if self.show_line_numbers { "Line numbers enabled".into() } else { "Line numbers disabled".into() });
+                                                    }
+                                                    1 => {                             // M+V
+                                                        if self.update_version.is_some() {
+                                                            let _ = webbrowser::open("https://github.com/mabognar/xnano/releases/latest");
+                                                            self.set_status(String::from("Opened browser to download update."));
+                                                        } else {
+                                                            self.set_status(String::from("xnano is the latest version"));
+                                                        }
+                                                    }
                                                     5 => { self.show_help()?; }        // ^H
                                                     _ => {}
                                                 }
@@ -1083,50 +1084,154 @@ impl Editor {
                 }
             };
 
-            let text = self.buffer.to_string();
-            let mut start_byte = self.buffer.char_to_byte(self.get_cursor_char_idx());
+            let mut current_idx = self.get_cursor_char_idx();
+            let mut matches_found = 0;
+            let mut wrapped = false;
 
-            // If we are currently standing on a match, bump our search forward by 1 character
-            // so we can cycle through occurrences of the same word.
-            if let Some(mat) = re.find_at(&text, start_byte) {
-                if mat.start() == start_byte {
-                    let current_char = self.get_cursor_char_idx();
-                    if current_char < self.buffer.len_chars() {
-                        start_byte = self.buffer.char_to_byte(current_char + 1);
+            // If we are currently standing exactly on a match from a previous search,
+            // bump our search forward by 1 character so we can continue cycling.
+            let initial_text = self.buffer.to_string();
+            let initial_byte = self.buffer.char_to_byte(current_idx);
+
+            if let Some(mat) = re.find_at(&initial_text, initial_byte) {
+                if mat.start() == initial_byte {
+                    if current_idx < self.buffer.len_chars() {
+                        current_idx += 1;
                     }
                 }
             }
 
-            if let Some(mat) = re.find_at(&text, start_byte) {
-                // Safely translate the found byte indices back to rope character coordinates
-                let absolute_pos = self.buffer.byte_to_char(mat.start());
-                self.cursor_y = self.buffer.char_to_line(absolute_pos);
-                self.cursor_x = absolute_pos - self.buffer.line_to_char(self.cursor_y);
-                self.desired_cursor_x = self.cursor_x;
+            loop {
+                let text = self.buffer.to_string();
+                let current_byte = self.buffer.char_to_byte(current_idx);
 
-                let match_len = self.buffer.byte_to_char(mat.end()) - absolute_pos;
-                self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
+                if let Some(mat) = re.find_at(&text, current_byte) {
+                    let start_idx = self.buffer.byte_to_char(mat.start());
+                    let end_idx = self.buffer.byte_to_char(mat.end());
 
-                self.clear_status();
-            } else {
-                // If not found from cursor downwards, wrap to the top of the file
-                if let Some(mat) = re.find(&text) {
-                    let absolute_pos = self.buffer.byte_to_char(mat.start());
-                    self.cursor_y = self.buffer.char_to_line(absolute_pos);
-                    self.cursor_x = absolute_pos - self.buffer.line_to_char(self.cursor_y);
+                    // Safely translate the found byte indices back to rope character coordinates
+                    self.cursor_y = self.buffer.char_to_line(start_idx);
+                    self.cursor_x = start_idx - self.buffer.line_to_char(self.cursor_y);
                     self.desired_cursor_x = self.cursor_x;
+                    self.scroll()?;
 
-                    let match_len = self.buffer.byte_to_char(mat.end()) - absolute_pos;
+                    let match_len = end_idx - start_idx;
                     self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
 
-                    self.set_status(String::from("Search wrapped to top"));
+                    // Prompt the user to keep searching or stop
+                    let prompt_result = self.prompt_yn("Find next instance?");
+
+                    self.highlight_match = None;
+                    matches_found += 1;
+
+                    if let Some(action) = prompt_result? {
+                        if action {
+                            // User clicked Yes: advance past this match and loop again
+                            current_idx = end_idx;
+                            self.clear_status();
+                        } else {
+                            // User clicked No: stop at the current cursor location
+                            self.clear_status();
+                            break;
+                        }
+                    } else {
+                        // User Cancelled: stop at the current cursor location
+                        self.set_status(String::from("Search cancelled"));
+                        break;
+                    }
                 } else {
-                    self.set_status(format!("Pattern \"{}\" not found", query));
+                    // No matches found from the cursor position downwards
+                    if current_idx > 0 && !wrapped {
+                        // Wrap to the top of the document and search again
+                        current_idx = 0;
+                        wrapped = true;
+                        self.set_status(String::from("Search wrapped to top"));
+                    } else {
+                        if matches_found == 0 {
+                            self.set_status(format!("Pattern \"{}\" not found", query));
+                        } else {
+                            self.set_status(String::from("No more matches found"));
+                        }
+                        break;
+                    }
                 }
             }
         }
         Ok(())
     }
+    // pub(crate) fn where_is(&mut self) -> io::Result<()> {
+    //     let prompt_text = if let Some(ref last) = self.last_search {
+    //         format!("Search (RegEx) [{}]: ", last)
+    //     } else {
+    //         String::from("Search (RegEx): ")
+    //     };
+    //
+    //     if let Some(mut query) = self.prompt(&prompt_text, false)? {
+    //         if query.is_empty() {
+    //             if let Some(ref last) = self.last_search {
+    //                 query = last.clone();
+    //             } else {
+    //                 self.set_status(String::from("Cancelled"));
+    //                 return Ok(());
+    //             }
+    //         } else {
+    //             self.last_search = Some(query.clone());
+    //         }
+    //
+    //         // Compile the regex. If the user typed invalid regex syntax, let them know!
+    //         let re = match regex::Regex::new(&query) {
+    //             Ok(re) => re,
+    //             Err(_) => {
+    //                 self.set_status(String::from("Invalid regex pattern"));
+    //                 return Ok(());
+    //             }
+    //         };
+    //
+    //         let text = self.buffer.to_string();
+    //         let mut start_byte = self.buffer.char_to_byte(self.get_cursor_char_idx());
+    //
+    //         // If we are currently standing on a match, bump our search forward by 1 character
+    //         // so we can cycle through occurrences of the same word.
+    //         if let Some(mat) = re.find_at(&text, start_byte) {
+    //             if mat.start() == start_byte {
+    //                 let current_char = self.get_cursor_char_idx();
+    //                 if current_char < self.buffer.len_chars() {
+    //                     start_byte = self.buffer.char_to_byte(current_char + 1);
+    //                 }
+    //             }
+    //         }
+    //
+    //         if let Some(mat) = re.find_at(&text, start_byte) {
+    //             // Safely translate the found byte indices back to rope character coordinates
+    //             let absolute_pos = self.buffer.byte_to_char(mat.start());
+    //             self.cursor_y = self.buffer.char_to_line(absolute_pos);
+    //             self.cursor_x = absolute_pos - self.buffer.line_to_char(self.cursor_y);
+    //             self.desired_cursor_x = self.cursor_x;
+    //
+    //             let match_len = self.buffer.byte_to_char(mat.end()) - absolute_pos;
+    //             self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
+    //
+    //             self.clear_status();
+    //         } else {
+    //             // If not found from cursor downwards, wrap to the top of the file
+    //             if let Some(mat) = re.find(&text) {
+    //                 let absolute_pos = self.buffer.byte_to_char(mat.start());
+    //                 self.cursor_y = self.buffer.char_to_line(absolute_pos);
+    //                 self.cursor_x = absolute_pos - self.buffer.line_to_char(self.cursor_y);
+    //                 self.desired_cursor_x = self.cursor_x;
+    //
+    //                 let match_len = self.buffer.byte_to_char(mat.end()) - absolute_pos;
+    //                 self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
+    //
+    //                 self.set_status(String::from("Search wrapped to top"));
+    //             } else {
+    //                 self.set_status(format!("Pattern \"{}\" not found", query));
+    //             }
+    //         }
+    //     }
+    //     Ok(())
+    // }
+
     // pub(crate) fn where_is(&mut self) -> io::Result<()> {
     //     let prompt_text = if let Some(ref last) = self.last_search {
     //         format!("Search [{}]: ", last)

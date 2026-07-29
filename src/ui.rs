@@ -82,7 +82,7 @@ impl UiExt for Editor {
         let colors = Self::get_theme_colors(theme);
 
         let ui_bg = colors.menu_bg;
-        let title_fg = if colors.is_dark { Color::Reset } else { Color::Black };
+        // let title_fg = if colors.is_dark { Color::Reset } else { Color::Black };
         let menu_key_fg = colors.accent;
         let menu_text_fg = colors.fg;
 
@@ -115,8 +115,13 @@ impl UiExt for Editor {
         let file_section = format!("{}", file_display_string);
 
         // --- NEW TITLE BAR LOGIC ---
-        let mod_star = if self.is_modified { "*" } else { "" };
-        let indicators_len = 4; // Space for " S L"
+        let mod_star = if self.is_modified { " *" } else { "" };
+
+        // Build the cursor position string (adding 1 so it is 1-based instead of 0-based index)
+        let cursor_str = format!("L:{} C:{} -", self.cursor_y + 1, self.cursor_x + 1);
+
+        // Calculate the exact space needed on the right side: cursor string + " S L" (4 chars)
+        let indicators_len = cursor_str.chars().count() + 4;
 
         let max_allowable_len = (cols as usize).saturating_sub(indicators_len);
         let full_len = title.chars().count() + file_section.chars().count() + mod_star.chars().count();
@@ -152,6 +157,8 @@ impl UiExt for Editor {
             Print(mod_star),
             Print(pad2),
             // Print the right-aligned indicators
+            SetForegroundColor(menu_key_fg),
+            Print(&cursor_str),
             Print(" "),
             SetForegroundColor(s_color),
             Print("S"),
@@ -566,11 +573,11 @@ impl UiExt for Editor {
         match self.menu_state {
             MenuState::Menu1 => {
                 let menu1 = [
-                    ("^O", " Write Out"), ("^R", " Read File"), ("^C", " Cur Pos"), ("^K", " Cut Txt"), ("^J", " Justify"), ("M+O", " Other 1/4") // Updated
+                    ("^O", " Write Out"), ("^R", " Read File"), ("^J", " Justify"), ("^K", " Cut Txt"), ("M+U", " Undo"), ("M+O", " Other 1/4") // Updated
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
                 let menu2 = [
-                    ("^X", " Exit"), ("^W", " Where Is"), ("^L", " To Line"), ("^U", " UnCut Txt"), ("^T", " To Spell"), (" ^H", " Help")
+                    ("^X", " Exit"), ("^W", " Where Is"), ("^\\", " Replace"), ("^U", " UnCut Txt"), ("M+R", " Redo"), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
@@ -586,22 +593,22 @@ impl UiExt for Editor {
             }
             MenuState::Menu3 => {
                 let menu1 = [
-                    ("^\\", " Replace"), ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 3/4") // Updated
+                    ("^C", " Cur Pos"), ("M+A", " Mark Beg"), ("^T", " To Spell"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 3/4") // Updated
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
                 let menu2 = [
-                    ("^D", " Delete"), ("M+A", " Mark Beg"), ("M+V", " Update"), ("M+L", " Line Num"), ("M+.", " Next Mrk"), (" ^H", " Help")
+                    ("^L", " To Line"), (" ^D", " Delete"), ("", ""), ("", ""), ("M+.", " Next Mrk"), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
             MenuState::Menu4 => {
                 let menu1 = [
-                    ("M+U", " Undo"), ("M+R", " Redo"), ("", ""), ("", ""), ("", ""), ("M+O", " Other 4/4")
+                    ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("", ""), ("", ""), ("", ""), ("M+O", " Other 4/4")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
                 let menu2 = [
-                    ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), (" ^H", " Help")
+                    ("M+L", " Line Num"), ("M+V", " Update"), ("", ""), ("", ""), ("", ""), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
@@ -802,6 +809,8 @@ impl UiExt for Editor {
     }
 
     fn prompt(&mut self, prompt_text: &str, allow_browser: bool) -> io::Result<Option<String>> {
+        let original_menu = self.menu_state;
+
         if self.menu_state == MenuState::Menu1
             || self.menu_state == MenuState::Menu2
             || self.menu_state == MenuState::Menu3
@@ -913,23 +922,23 @@ impl UiExt for Editor {
                                 }
                             }
                             self.clear_status();
-                            self.menu_state = MenuState::Menu1;
+                            self.menu_state = original_menu;
                             return Ok(Some(input));
                         }
                         KeyCode::Esc => {
                             self.set_status(String::from("Cancelled."));
-                            self.menu_state = MenuState::Menu1;
+                            self.menu_state = original_menu;
                             return Ok(None);
                         }
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             self.set_status(String::from("Cancelled."));
-                            self.menu_state = MenuState::Menu1;
+                            self.menu_state = original_menu;
                             return Ok(None);
                         }
                         KeyCode::Char('t') if allow_browser && key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if let Some(selected_path) = self.run_file_browser()? {
                                 self.clear_status();
-                                self.menu_state = MenuState::Menu1;
+                                self.menu_state = original_menu;
                                 return Ok(Some(selected_path));
                             }
                             self.menu_state = MenuState::PromptWithBrowser;
@@ -972,28 +981,94 @@ impl UiExt for Editor {
                         // Check if the user clicked the bottom two rows
                         if mouse.row >= rows - 2 {
                             let is_top = mouse.row == rows - 2;
-                            let col_width = (cols as usize) / 6;
-                            let col_idx = (mouse.column as usize) / col_width;
 
-                            if col_idx == 0 {
-                                if is_top && allow_browser {
-                                    // Trigger File Browser (^T)
-                                    if let Some(selected_path) = self.run_file_browser()? {
+                            // --- NEW SPELLCHECK MOUSE LOGIC ---
+                            if self.menu_state == MenuState::SpellCheck {
+                                let col_width = (cols as usize) / 5;
+                                let col_idx = (mouse.column as usize) / col_width;
+
+                                if is_top {
+                                    // Handle clicking a suggestion (1-5)
+                                    if col_idx < 5 && col_idx < self.current_suggestions.len() {
                                         self.clear_status();
-                                        self.menu_state = MenuState::Menu1;
-                                        return Ok(Some(selected_path));
+                                        self.menu_state = original_menu;
+                                        return Ok(Some((col_idx + 1).to_string()));
                                     }
-                                    self.menu_state = MenuState::PromptWithBrowser;
-                                } else if !is_top {
-                                    // Trigger Cancel (^C)
-                                    self.set_status(String::from("Cancelled."));
-                                    self.menu_state = MenuState::Menu1;
-                                    return Ok(None);
+                                } else {
+                                    match col_idx {
+                                        0 => { // ^C Cancel
+                                            self.set_status(String::from("Cancelled."));
+                                            self.menu_state = original_menu;
+                                            return Ok(None);
+                                        }
+                                        1 => { // I Ignore
+                                            self.clear_status();
+                                            self.menu_state = original_menu;
+                                            return Ok(Some(String::from("i")));
+                                        }
+                                        2 => { // A Add to Dict
+                                            self.clear_status();
+                                            self.menu_state = original_menu;
+                                            return Ok(Some(String::from("a")));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            // --- STANDARD PROMPT MOUSE LOGIC ---
+                            else {
+                                let col_width = (cols as usize) / 6;
+                                let col_idx = (mouse.column as usize) / col_width;
+
+                                if col_idx == 0 {
+                                    if is_top && allow_browser {
+                                        // Trigger File Browser (^T)
+                                        if let Some(selected_path) = self.run_file_browser()? {
+                                            self.clear_status();
+                                            self.menu_state = original_menu;
+                                            return Ok(Some(selected_path));
+                                        }
+                                        self.menu_state = MenuState::PromptWithBrowser;
+                                    } else if !is_top {
+                                        // Trigger Cancel (^C)
+                                        self.set_status(String::from("Cancelled."));
+                                        self.menu_state = original_menu;
+                                        return Ok(None);
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                // Event::Mouse(mouse) => {
+                //     if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
+                //         let (cols, rows) = terminal::size()?;
+                //
+                //         // Check if the user clicked the bottom two rows
+                //         if mouse.row >= rows - 2 {
+                //             let is_top = mouse.row == rows - 2;
+                //             let col_width = (cols as usize) / 6;
+                //             let col_idx = (mouse.column as usize) / col_width;
+                //
+                //             if col_idx == 0 {
+                //                 if is_top && allow_browser {
+                //                     // Trigger File Browser (^T)
+                //                     if let Some(selected_path) = self.run_file_browser()? {
+                //                         self.clear_status();
+                //                         self.menu_state = original_menu; // <--- Update here
+                //                         return Ok(Some(selected_path));
+                //                     }
+                //                     self.menu_state = MenuState::PromptWithBrowser;
+                //                 } else if !is_top {
+                //                     // Trigger Cancel (^C)
+                //                     self.set_status(String::from("Cancelled."));
+                //                     self.menu_state = original_menu; // <--- Update here
+                //                     return Ok(None);
+                //                 }
+                //             }
+                //         }
+                //     }
+                // }
                 _ => {}
             }
             // if let Event::Key(key) = event::read()? {
@@ -1083,6 +1158,7 @@ impl UiExt for Editor {
     }
 
     fn prompt_yn(&mut self, prompt_text: &str) -> io::Result<Option<bool>> {
+        let original_menu = self.menu_state; // Capture state to prevent jump-back bugs
         self.menu_state = MenuState::YesNoCancel;
         self.status_time = None;
         let mut result = None;
@@ -1092,45 +1168,130 @@ impl UiExt for Editor {
             self.draw_screen()?;
 
             let (_, rows) = terminal::size()?;
-            let mut stdout = stdout();
-
+            let mut stdout = io::stdout();
             let cursor_x = self.status_message.len();
+
             queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
             stdout.flush()?;
 
-            if let Event::Key(key) = event::read()? {
-                if key.kind != event::KeyEventKind::Press {
-                    continue;
+            let ev = event::read()?;
+            match ev {
+                Event::Key(key) => {
+                    if key.kind != event::KeyEventKind::Press {
+                        continue;
+                    }
+                    match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            self.clear_status();
+                            result = Some(true);
+                            break;
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') => {
+                            self.clear_status();
+                            result = Some(false);
+                            break;
+                        }
+                        KeyCode::Esc => {
+                            self.set_status(String::from("Cancelled"));
+                            break;
+                        }
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            self.set_status(String::from("Cancelled"));
+                            break;
+                        }
+                        _ => {}
+                    }
                 }
-                match key.code {
-                    KeyCode::Char('y') | KeyCode::Char('Y') => {
-                        self.clear_status();
-                        result = Some(true);
-                        break;
+                Event::Mouse(mouse) => {
+                    if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
+                        let (cols, rows) = terminal::size()?;
+                        if mouse.row >= rows - 2 {
+                            let is_top = mouse.row == rows - 2;
+                            let col_width = (cols as usize) / 6;
+                            let col_idx = (mouse.column as usize) / col_width;
+
+                            if is_top {
+                                if col_idx == 0 { // Y Yes
+                                    self.clear_status();
+                                    result = Some(true);
+                                    break;
+                                }
+                            } else {
+                                match col_idx {
+                                    0 => { // N No
+                                        self.clear_status();
+                                        result = Some(false);
+                                        break;
+                                    }
+                                    1 => { // ^C Cancel
+                                        self.set_status(String::from("Cancelled"));
+                                        break;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
                     }
-                    KeyCode::Char('n') | KeyCode::Char('N') => {
-                        self.clear_status();
-                        result = Some(false);
-                        break;
-                    }
-                    KeyCode::Esc => {
-                        self.set_status(String::from("Cancelled"));
-                        break;
-                    }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.set_status(String::from("Cancelled"));
-                        break;
-                    }
-                    _ => {}
                 }
+                _ => {}
             }
         }
 
-        self.menu_state = MenuState::Menu1;
+        self.menu_state = original_menu; // Restore original state
         Ok(result)
     }
+    // fn prompt_yn(&mut self, prompt_text: &str) -> io::Result<Option<bool>> {
+    //     let original_menu = self.menu_state;
+    //     self.menu_state = MenuState::YesNoCancel;
+    //     self.status_time = None;
+    //     let mut result = None;
+    //
+    //     loop {
+    //         self.status_message = prompt_text.to_string();
+    //         self.draw_screen()?;
+    //
+    //         let (_, rows) = terminal::size()?;
+    //         let mut stdout = stdout();
+    //
+    //         let cursor_x = self.status_message.len();
+    //         queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
+    //         stdout.flush()?;
+    //
+    //         if let Event::Key(key) = event::read()? {
+    //             if key.kind != event::KeyEventKind::Press {
+    //                 continue;
+    //             }
+    //             match key.code {
+    //                 KeyCode::Char('y') | KeyCode::Char('Y') => {
+    //                     self.clear_status();
+    //                     result = Some(true);
+    //                     break;
+    //                 }
+    //                 KeyCode::Char('n') | KeyCode::Char('N') => {
+    //                     self.clear_status();
+    //                     result = Some(false);
+    //                     break;
+    //                 }
+    //                 KeyCode::Esc => {
+    //                     self.set_status(String::from("Cancelled"));
+    //                     break;
+    //                 }
+    //                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+    //                     self.set_status(String::from("Cancelled"));
+    //                     break;
+    //                 }
+    //                 _ => {}
+    //             }
+    //         }
+    //     }
+    //
+    //     self.menu_state = MenuState::Menu1;
+    //     self.menu_state = original_menu;
+    //     Ok(result)
+    // }
 
     fn prompt_replace(&mut self, prompt_text: &str) -> io::Result<Option<char>> {
+        let original_menu = self.menu_state;
         self.menu_state = MenuState::ReplaceAction;
         self.status_time = None;
         let mut result = None;
@@ -1219,6 +1380,7 @@ impl UiExt for Editor {
         }
 
         self.menu_state = MenuState::Menu1;
+        self.menu_state = original_menu;
         Ok(result)
     }
 
@@ -1541,9 +1703,9 @@ impl UiExt for Editor {
             "    M+F, M+Right, ^Right  Move right/forward one word",
             "    ^A                    Move to start of line",
             "    ^E                    Move to end of line",
-            "   M+M                    Mark current line",
-            "   M+,                    Move to previous mark",
-            "   M+.                    Move to next mark",
+            "    M+M                   Mark current line",
+            "    M+,                   Move to previous mark",
+            "    M+.                   Move to next mark",
             "",
             "  Editing:",
             "    M+U                   Undo last action",

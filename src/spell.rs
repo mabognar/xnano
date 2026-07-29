@@ -75,6 +75,8 @@ impl SpellExt for Editor {
     }
 
     fn spell_check(&mut self) -> io::Result<()> {
+        let original_menu = self.menu_state;
+
         if self.dictionary.is_none() {
             self.dictionary = Some(Self::load_dictionary());
         }
@@ -130,7 +132,8 @@ impl SpellExt for Editor {
 
             let choice_result = self.prompt("Replace with: ", false)?;
 
-            self.menu_state = MenuState::Menu1;
+            self.menu_state = original_menu;
+
             let current_suggs_copy = self.current_suggestions.clone();
             self.current_suggestions.clear();
 
