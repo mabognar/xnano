@@ -1,9 +1,11 @@
 # xnano
 xnano is a terminal text editor - efficient, easy-to-use, with modern features 
 
-<img width="852" height="700" alt="xnano1" src="https://github.com/user-attachments/assets/b53f50da-3f7c-472e-a2dc-2df6562d2d41" />
-<img width="852" height="700" alt="xnano2" src="https://github.com/user-attachments/assets/c75fd1be-8d2f-4f0b-baf5-9a551e9ed2bb" />
-<img width="852" height="700" alt="xnano3" src="https://github.com/user-attachments/assets/3fc045ec-3942-4077-9712-7e799f862e3a" />
+<img width="852" height="700" alt="xnano1" src="https://github.com/user-attachments/assets/479e8c56-5a40-4312-abf8-1fed286b20b7" />
+<img width="852" height="700" alt="xnano2" src="https://github.com/user-attachments/assets/1c4ea614-51ed-467b-b7bf-d16f84ae9b25" />
+<img width="852" height="700" alt="xnano3" src="https://github.com/user-attachments/assets/e994620c-7c5a-49dc-b460-2459c0133f48" />
+
+
 
 ## Download
 For macOS and Linux (.deb) binaries, go to
