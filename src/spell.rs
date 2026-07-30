@@ -1,9 +1,10 @@
 use crate::editor::{Editor, MenuState};
 use crate::ui::UiExt;
-use crate::config::ConfigExt; // Added so we can find the ~/.xnano/ directory
+use crate::config::ConfigExt;
+
 use std::collections::HashSet;
-use std::fs::{File, OpenOptions}; // Added OpenOptions for appending to files
-use std::io::{self, BufRead, BufReader, Write}; // Added Write for writeln!
+use std::fs::{File, OpenOptions};
+use std::io::{self, BufRead, BufReader, Write};
 
 pub trait SpellExt {
     fn load_dictionary() -> HashSet<String>;
@@ -17,7 +18,7 @@ impl SpellExt for Editor {
     fn load_dictionary() -> HashSet<String> {
         let mut dict = HashSet::new();
 
-        // 1. Load standard system dictionary
+        // load standard system dictionary
         let dict_paths = ["/usr/share/dict/words", "/usr/dict/words"];
         for path in dict_paths {
             if let Ok(file) = File::open(path) {
@@ -29,7 +30,7 @@ impl SpellExt for Editor {
             }
         }
 
-        // 2. Load custom persistent dictionary (if it exists)
+        // load custom dictionary (if it exists)
         if let Some(mut custom_path) = Self::get_base_dir() {
             custom_path.push("custom_dict.txt");
             if let Ok(file) = File::open(&custom_path) {
@@ -101,18 +102,13 @@ impl SpellExt for Editor {
             self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + word_len));
             self.draw_screen()?;
 
-            // let dict = self.dictionary.as_ref().unwrap();
-            // let suggestions = Self::get_suggestions(&lower_word, dict);
-            //
-            // self.current_suggestions = suggestions.into_iter().take(4).collect();
-
             let dict = self.dictionary.as_ref().unwrap();
             let raw_suggestions = Self::get_suggestions(&lower_word, dict);
 
-            // Check if the original word's first character is uppercase
+            // check if the original word's first character is uppercase
             let is_capitalized = word.chars().next().map_or(false, char::is_uppercase);
 
-            // Format the suggestions to match the original casing
+            // format the suggestions to match the original casing
             let formatted_suggestions: Vec<String> = if is_capitalized {
                 raw_suggestions.into_iter().map(|s| {
                     let mut chars = s.chars();
@@ -125,7 +121,7 @@ impl SpellExt for Editor {
                 raw_suggestions
             };
 
-            // Store the appropriately cased suggestions
+            // store the correctly cased suggestions
             self.current_suggestions = formatted_suggestions.into_iter().take(5).collect();
 
             self.menu_state = MenuState::SpellCheck;
@@ -222,19 +218,3 @@ impl SpellExt for Editor {
 
 }
 
-// pub fn get_distance(a: &str, b: &str) -> usize {
-//     let a: Vec<char> = a.chars().collect();
-//     let b: Vec<char> = b.chars().collect();
-//     let mut cache: Vec<usize> = (0..=b.len()).collect();
-//     let mut result = cache.clone();
-//
-//     for (i, &a_char) in a.iter().enumerate() {
-//         result[0] = i + 1;
-//         for (j, &b_char) in b.iter().enumerate() {
-//             let cost = if a_char == b_char { 0 } else { 1 };
-//             result[j + 1] = (result[j] + 1).min(cache[j + 1] + 1).min(cache[j] + cost);
-//         }
-//         cache.copy_from_slice(&result);
-//     }
-//     result[b.len()]
-// }

@@ -1,5 +1,6 @@
 use crate::editor::{Editor, MenuState};
 use crate::config::ConfigExt;
+
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
@@ -90,7 +91,7 @@ impl UiExt for Editor {
         let dollar_fg = if colors.is_dark { Color::Black } else { Color::White };
 
         let version = env!("CARGO_PKG_VERSION");
-        let title = format!("xnano ({})  ", version);
+        let title = format!("xnano ({})   ", version);
 
         queue!(stdout, cursor::MoveTo(0, 0), SetBackgroundColor(ui_bg))?;
 
@@ -118,9 +119,9 @@ impl UiExt for Editor {
         let mod_star = if self.is_modified { "*" } else { "" };
 
         // Build the cursor position string (adding 1 so it is 1-based instead of 0-based index)
-        let cursor_str = format!("  L:{} C:{}", self.cursor_y + 1, self.cursor_x + 1);
+        let cursor_str = format!("   L:{} C:{}", self.cursor_y + 1, self.cursor_x + 1);
 
-        // Calculate the exact space needed on the right side: cursor string + " S L" (4 chars)
+        // Calculate the exact space needed on the right side: cursor string + " SLM" (4 chars total: 1 space + 3 letters)
         let indicators_len = cursor_str.chars().count() + 4;
 
         let max_allowable_len = (cols as usize).saturating_sub(indicators_len);
@@ -145,26 +146,19 @@ impl UiExt for Editor {
             }
         }
 
-        // // truncate only if the file path overflows, making room for the asterisk
-        // let mut final_file_section = file_section.clone();
-        // if full_len > max_allowable_len {
-        //     let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count() + mod_star.chars().count());
-        //     if allowed_file_len > 3 {
-        //         final_file_section = file_section.chars().take(allowed_file_len.saturating_sub(3)).collect();
-        //         final_file_section.push_str("... ");
-        //     } else {
-        //         final_file_section = String::new();
-        //     }
-        // }
-
         let printed_left_len = title.chars().count() + final_file_section.chars().count() + mod_star.chars().count();
         let pad2_len = (cols as usize).saturating_sub(printed_left_len + indicators_len);
         let pad2 = " ".repeat(pad2_len);
 
-        // Define our toggle indicator colors
-        let inactive_color = Color::Rgb { r: 128, g: 128, b: 128 }; // Muted grey
+        // let inactive_color = Color::Rgb { r: 128, g: 128, b: 128 }; // Muted grey
+        let inactive_color = if colors.is_dark {
+            Color::Rgb { r: 100, g: 100, b: 100 } // grey for dark themes
+        } else {
+            Color::Rgb { r: 180, g: 180, b: 180 } // grey for light themes
+        };
         let s_color = if self.soft_wrap { colors.indicator } else { inactive_color };
         let l_color = if self.show_line_numbers { colors.indicator } else { inactive_color };
+        let m_color = if !self.line_marks.is_empty() { colors.indicator } else { inactive_color };
 
         queue!(
             stdout,
@@ -178,122 +172,80 @@ impl UiExt for Editor {
             // Print the right-aligned indicators
             SetForegroundColor(menu_key_fg),
             Print(&cursor_str),
-            Print(" "),
+            Print(" "), // Single space separating the cursor position from the indicators
             SetForegroundColor(s_color),
             Print("S"),
-            SetForegroundColor(inactive_color), // Color for the space between
-            Print(" "),
             SetForegroundColor(l_color),
             Print("L"),
+            SetForegroundColor(m_color),
+            Print("M"),
             // Reset colors for the rest of the screen
             SetForegroundColor(Color::Reset),
             SetBackgroundColor(Color::Reset)
         )?;
         // ---------------------------
 
-        // let mod_str = if self.is_modified { "[ Modified ]" } else { "" };
-        // let indicators_len = 4; // Space for " S L"
-        // let right_total_len = mod_str.len() + indicators_len;
+        // let mod_star = if self.is_modified { "*" } else { "" };
         //
-        // let max_allowable_len = (cols as usize).saturating_sub(right_total_len);
-        // let full_len = title.chars().count() + file_section.chars().count();
+        // // cursor position string (adding 1 so it is 1-based instead of 0-based index)
+        // let cursor_str = format!("   L:{} C:{}", self.cursor_y + 1, self.cursor_x + 1);
         //
-        // // truncate only if the file path overflows
+        // // calculate the exact space needed on the right side: cursor string + " S L" (4 chars)
+        // let indicators_len = cursor_str.chars().count() + 4;
+        //
+        // let max_allowable_len = (cols as usize).saturating_sub(indicators_len);
+        // let full_len = title.chars().count() + file_section.chars().count() + mod_star.chars().count();
+        //
+        // // truncate only if file path overflows, making room for the asterisk
         // let mut final_file_section = file_section.clone();
         // if full_len > max_allowable_len {
-        //     let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count());
+        //     let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count() + mod_star.chars().count());
         //     if allowed_file_len > 3 {
-        //         final_file_section = file_section.chars().take(allowed_file_len.saturating_sub(3)).collect();
-        //         final_file_section.push_str("...");
+        //         // calculate how many characters from the end of the path we can keep
+        //         let keep_len = allowed_file_len.saturating_sub(3);
+        //         let skip_len = file_section.chars().count().saturating_sub(keep_len);
+        //
+        //         // skip the beginning characters and collect the tail
+        //         let tail: String = file_section.chars().skip(skip_len).collect();
+        //
+        //         // prepend dots
+        //         final_file_section = format!("...{}", tail);
         //     } else {
         //         final_file_section = String::new();
         //     }
         // }
         //
-        // let printed_left_len = title.chars().count() + final_file_section.chars().count();
-        // let pad2_len = (cols as usize).saturating_sub(printed_left_len + right_total_len);
+        // let printed_left_len = title.chars().count() + final_file_section.chars().count() + mod_star.chars().count();
+        // let pad2_len = (cols as usize).saturating_sub(printed_left_len + indicators_len);
         // let pad2 = " ".repeat(pad2_len);
         //
-        // // Define our toggle indicator colors
-        // // Define our toggle indicator colors
+        // // define our toggle indicator colors
         // let inactive_color = Color::Rgb { r: 128, g: 128, b: 128 }; // Muted grey
         // let s_color = if self.soft_wrap { colors.indicator } else { inactive_color };
         // let l_color = if self.show_line_numbers { colors.indicator } else { inactive_color };
-        // // let inactive_color = Color::Rgb { r: 128, g: 128, b: 128 }; // Muted grey
-        // // let s_color = if self.soft_wrap { menu_key_fg } else { inactive_color };
-        // // let l_color = if self.show_line_numbers { menu_key_fg } else { inactive_color };
         //
         // queue!(
         //     stdout,
         //     SetForegroundColor(menu_key_fg),
         //     Print(&title),
-        //     SetForegroundColor(menu_key_fg),
         //     Print(&final_file_section),
+        //     SetForegroundColor(colors.indicator),
+        //     Print(mod_star),
         //     Print(pad2),
+        //     // print right-aligned indicators
         //     SetForegroundColor(menu_key_fg),
-        //     Print(mod_str),
-        //     // Print the new indicators
+        //     Print(&cursor_str),
         //     Print(" "),
         //     SetForegroundColor(s_color),
         //     Print("S"),
+        //     SetForegroundColor(inactive_color),
         //     Print(" "),
         //     SetForegroundColor(l_color),
         //     Print("L"),
-        //     // Reset colors for the rest of the screen
+        //     // reset colors for the rest of the screen
         //     SetForegroundColor(Color::Reset),
         //     SetBackgroundColor(Color::Reset)
         // )?;
-        // // ---------------------------
-
-        // let right_indicator_len = if self.is_modified { "[ Modified ]".len() } else { 0 };
-        // let max_allowable_len = (cols as usize).saturating_sub(right_indicator_len);
-        // let full_len = title.chars().count() + file_section.chars().count();
-        //
-        // // truncate only the file path overflows
-        // let mut final_file_section = file_section.clone();
-        // if full_len > max_allowable_len {
-        //     let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count());
-        //     if allowed_file_len > 3 {
-        //         final_file_section = file_section.chars().take(allowed_file_len.saturating_sub(3)).collect();
-        //         final_file_section.push_str("...");
-        //     } else {
-        //         final_file_section = String::new();
-        //     }
-        // }
-        //
-        // let printed_left_len = title.chars().count() + final_file_section.chars().count();
-        //
-        // if self.is_modified {
-        //     let right = "[ Modified ]";
-        //     let pad2_len = (cols as usize).saturating_sub(printed_left_len + right.len());
-        //     let pad2 = " ".repeat(pad2_len);
-        //
-        //     queue!(
-        //         stdout,
-        //         SetForegroundColor(menu_key_fg),
-        //         Print(&title),
-        //         SetForegroundColor(menu_key_fg),
-        //         Print(&final_file_section),
-        //         Print(pad2),
-        //         SetForegroundColor(menu_key_fg),
-        //         Print(right),
-        //         SetForegroundColor(Color::Reset),
-        //         SetBackgroundColor(Color::Reset)
-        //     )?;
-        // } else {
-        //     let pad2_len = (cols as usize).saturating_sub(printed_left_len);
-        //     let pad2 = " ".repeat(pad2_len);
-        //     queue!(
-        //         stdout,
-        //         SetForegroundColor(menu_key_fg),
-        //         Print(&title),
-        //         SetForegroundColor(menu_key_fg),
-        //         Print(&final_file_section),
-        //         Print(pad2),
-        //         SetForegroundColor(Color::Reset),
-        //         SetBackgroundColor(Color::Reset)
-        //     )?;
-        // }
 
         let syntax = if let Some(ref name) = self.filename {
             let path = std::path::Path::new(name);
@@ -354,42 +306,21 @@ impl UiExt for Editor {
                 queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
 
                 if gutter_width > 0 {
-                    // 1. Always check for the mark
+                    // check for the mark
                     let mark_indicator = if self.line_marks.contains(&file_y) { "*" } else { " " };
 
-                    // 2. Format the gutter string depending on the line number setting
+                    // format the gutter string depending on the line-number setting
                     let gutter_str = if self.show_line_numbers {
                         format!("{:>width$}{} ", file_y + 1, mark_indicator, width = max_line_num_len)
                     } else {
                         format!("{} ", mark_indicator)
                     };
 
-                    // 3. Print the gutter
+                    // print the gutter
                     if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
                     if last_fg != Some(menu_key_fg) { queue!(stdout, SetForegroundColor(menu_key_fg))?; last_fg = Some(menu_key_fg); }
                     queue!(stdout, Print(gutter_str))?;
                 }
-
-                // queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
-                // if self.show_line_numbers {
-                //     // Check if the current line is in our marks set
-                //     let mark_indicator = if self.line_marks.contains(&file_y) { "*" } else { " " };
-                //
-                //     // Add the indicator to the string formatting
-                //     let num_str = format!("{:>width$}{} ", file_y + 1, mark_indicator, width = max_line_num_len);
-                //
-                //     if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
-                //     if last_fg != Some(menu_key_fg) { queue!(stdout, SetForegroundColor(menu_key_fg))?; last_fg = Some(menu_key_fg); }
-                //     queue!(stdout, Print(num_str))?;
-                // }
-
-                // queue!(stdout, cursor::MoveTo(0, (terminal_y + 1) as u16))?;
-                // if self.show_line_numbers {
-                //     let num_str = format!("{:>width$} ", file_y + 1, width = max_line_num_len);
-                //     if last_bg != Some(default_cross_bg) { queue!(stdout, SetBackgroundColor(default_cross_bg))?; last_bg = Some(default_cross_bg); }
-                //     if last_fg != Some(menu_key_fg) { queue!(stdout, SetForegroundColor(menu_key_fg))?; last_fg = Some(menu_key_fg); }
-                //     queue!(stdout, Print(num_str))?;
-                // }
 
                 let mut printed_on_current_line = 0;
 
@@ -555,25 +486,6 @@ impl UiExt for Editor {
 
             let mut printed_len = 0;
 
-            // if self.menu_state == MenuState::SpellCheck {
-            //     if !self.current_suggestions.is_empty() {
-            //         for (i, sug) in self.current_suggestions.iter().enumerate() {
-            //             let num_str = format!("{}", i + 1);
-            //             queue!(
-            //                 stdout,
-            //                 SetForegroundColor(menu_key_fg),
-            //                 Print(&num_str),
-            //                 SetForegroundColor(title_fg),
-            //                 Print(format!(" {}   ", sug))
-            //             )?;
-            //             printed_len += num_str.len() + 1 + sug.len() + 3;
-            //         }
-            //     } else {
-            //         queue!(stdout, SetForegroundColor(title_fg), Print("No suggestions   "))?;
-            //         printed_len += "No suggestions   ".len();
-            //     }
-            // }
-
             let status_text = format!("{}", self.status_message);
             queue!(stdout, SetForegroundColor(menu_key_fg), Print(&status_text))?;
             printed_len += status_text.len();
@@ -631,40 +543,6 @@ impl UiExt for Editor {
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
-            // MenuState::Menu1 => {
-            //     let menu1 = [
-            //         ("^O", " Write Out"), ("^R", " Read File"), ("^C", " Cur Pos"), ("^K", " Cut Txt"), ("^J", " Justify"), ("M+O", " Other 1/3") // Updated
-            //     ];
-            //     Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
-            //
-            //     let menu2 = [
-            //         ("^X", " Exit"), ("^W", " Where Is"), ("^L", " To Line"), ("^U", " UnCut Txt"), ("^T", " To Spell"), (" ^H", " Help")
-            //     ];
-            //     Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
-            // }
-            // MenuState::Menu2 => { // NEW PAGE BLOCK
-            //     let menu1 = [
-            //         ("^P", " Prv Lne"), ("^Y", " Prev Pg"), ("^B", " Back Chr"), ("M+B", " Back Wrd"), ("^A", " Beg Line"), ("M+O", " Other 2/3")
-            //     ];
-            //     Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
-            //
-            //     let menu2 = [
-            //         ("^N", " Nxt Line"), ("^V", " Next Pg"), ("^F", " Frwd Chr"), ("M+F", " Frwd Wrd"), ("^E", " End Line"), (" ^H", " Help")
-            //     ];
-            //     Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
-            // }
-            // MenuState::Menu3 => {
-            //     let menu1 = [
-            //         ("^\\", " Replace"), ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 3/3") // Updated
-            //     ];
-            //     Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
-            //
-            //     let menu2 = [
-            //         ("^D", " Delete"), ("M+A", " Mark Beg"), ("M+V", " Update"), ("M+L", " Line Num"), ("M+.", " Next Mrk"), (" ^H", " Help")
-            //     ];
-            //     Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
-            // }
-
             MenuState::YesNoCancel => {
                 let menu1 = [(" Y", " Yes")];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
@@ -883,17 +761,6 @@ impl UiExt for Editor {
 
             let mut cursor_x = clean_prompt.len();
 
-            // if self.menu_state == MenuState::SpellCheck {
-            //     if !self.current_suggestions.is_empty() {
-            //         for (i, sug) in self.current_suggestions.iter().enumerate() {
-            //             let num_str = format!("{}", i + 1);
-            //             cursor_x += num_str.len() + 1 + sug.len() + 3;
-            //         }
-            //     } else {
-            //         cursor_x += "No suggestions   ".len();
-            //     }
-            // }
-
             queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
 
             let theme = &self.theme_set.themes[&self.current_theme];
@@ -997,17 +864,17 @@ impl UiExt for Editor {
                     if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
                         let (cols, rows) = terminal::size()?;
 
-                        // Check if the user clicked the bottom two rows
+                        // check if bottom two rows were clicked
                         if mouse.row >= rows - 2 {
                             let is_top = mouse.row == rows - 2;
 
-                            // --- NEW SPELLCHECK MOUSE LOGIC ---
+                            // spellcheck mouse menu logic
                             if self.menu_state == MenuState::SpellCheck {
                                 let col_width = (cols as usize) / 5;
                                 let col_idx = (mouse.column as usize) / col_width;
 
                                 if is_top {
-                                    // Handle clicking a suggestion (1-5)
+                                    // click a suggestion (1-5)
                                     if col_idx < 5 && col_idx < self.current_suggestions.len() {
                                         self.clear_status();
                                         self.menu_state = original_menu;
@@ -1034,14 +901,14 @@ impl UiExt for Editor {
                                     }
                                 }
                             }
-                            // --- STANDARD PROMPT MOUSE LOGIC ---
+                            // standard prompt menu mouse logic
                             else {
                                 let col_width = (cols as usize) / 6;
                                 let col_idx = (mouse.column as usize) / col_width;
 
                                 if col_idx == 0 {
                                     if is_top && allow_browser {
-                                        // Trigger File Browser (^T)
+                                        // trigger File Browser (^T)
                                         if let Some(selected_path) = self.run_file_browser()? {
                                             self.clear_status();
                                             self.menu_state = original_menu;
@@ -1059,120 +926,8 @@ impl UiExt for Editor {
                         }
                     }
                 }
-                // Event::Mouse(mouse) => {
-                //     if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
-                //         let (cols, rows) = terminal::size()?;
-                //
-                //         // Check if the user clicked the bottom two rows
-                //         if mouse.row >= rows - 2 {
-                //             let is_top = mouse.row == rows - 2;
-                //             let col_width = (cols as usize) / 6;
-                //             let col_idx = (mouse.column as usize) / col_width;
-                //
-                //             if col_idx == 0 {
-                //                 if is_top && allow_browser {
-                //                     // Trigger File Browser (^T)
-                //                     if let Some(selected_path) = self.run_file_browser()? {
-                //                         self.clear_status();
-                //                         self.menu_state = original_menu; // <--- Update here
-                //                         return Ok(Some(selected_path));
-                //                     }
-                //                     self.menu_state = MenuState::PromptWithBrowser;
-                //                 } else if !is_top {
-                //                     // Trigger Cancel (^C)
-                //                     self.set_status(String::from("Cancelled."));
-                //                     self.menu_state = original_menu; // <--- Update here
-                //                     return Ok(None);
-                //                 }
-                //             }
-                //         }
-                //     }
-                // }
                 _ => {}
             }
-            // if let Event::Key(key) = event::read()? {
-            //     if key.kind != event::KeyEventKind::Press {
-            //         continue;
-            //     }
-            //     match key.code {
-            //         KeyCode::Enter => {
-            //             if is_save_prompt && !input.is_empty() {
-            //                 let mut target = std::path::PathBuf::from(&input);
-            //
-            //                 if let Some(ref fname) = self.filename {
-            //                     let orig_path = std::path::Path::new(fname);
-            //                     if let Some(parent) = orig_path.parent() {
-            //                         // if user typed a new path like /tmp/file.txt, do not change
-            //                         if target.components().count() == 1 {
-            //                             target = parent.join(&input);
-            //                             input = target.to_string_lossy().into_owned();
-            //                         }
-            //                     }
-            //                 }
-            //
-            //                 if let Some(parent) = target.parent() {
-            //                     // if directory doesn't exist, throw error
-            //                     if !parent.as_os_str().is_empty() && !parent.exists() {
-            //                         self.set_status(String::from("File not saved. Directory does not exist."));
-            //                         self.menu_state = MenuState::Menu1;
-            //                         return Ok(None);
-            //                     }
-            //                 }
-            //             }
-            //
-            //             self.clear_status();
-            //             self.menu_state = MenuState::Menu1;
-            //             return Ok(Some(input));
-            //         }
-            //         KeyCode::Esc => {
-            //             self.set_status(String::from("Cancelled."));
-            //             self.menu_state = MenuState::Menu1;
-            //             return Ok(None);
-            //         }
-            //         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            //             self.set_status(String::from("Cancelled."));
-            //             self.menu_state = MenuState::Menu1;
-            //             return Ok(None);
-            //         }
-            //         KeyCode::Char('t') if allow_browser && key.modifiers.contains(KeyModifiers::CONTROL) => {
-            //             if let Some(selected_path) = self.run_file_browser()? {
-            //                 self.clear_status();
-            //                 self.menu_state = MenuState::Menu1;
-            //                 return Ok(Some(selected_path));
-            //             }
-            //             self.menu_state = MenuState::PromptWithBrowser;
-            //         }
-            //         KeyCode::Left => cursor_idx = cursor_idx.saturating_sub(1),
-            //         KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => cursor_idx = cursor_idx.saturating_sub(1),
-            //         KeyCode::Right => {
-            //             if cursor_idx < chars.len() { cursor_idx += 1; }
-            //         }
-            //         KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            //             if cursor_idx < chars.len() { cursor_idx += 1; }
-            //         }
-            //         KeyCode::Backspace => {
-            //             if cursor_idx > 0 {
-            //                 cursor_idx -= 1;
-            //                 chars.remove(cursor_idx);
-            //             }
-            //         }
-            //         KeyCode::Delete => {
-            //             if cursor_idx < chars.len() {
-            //                 chars.remove(cursor_idx);
-            //             }
-            //         }
-            //         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            //             if cursor_idx < chars.len() {
-            //                 chars.remove(cursor_idx);
-            //             }
-            //         }
-            //         KeyCode::Char(c) if !c.is_control() => {
-            //             chars.insert(cursor_idx, c);
-            //             cursor_idx += 1;
-            //         }
-            //         _ => {}
-            //     }
-            // }
         }
     }
 
@@ -1259,55 +1014,6 @@ impl UiExt for Editor {
         self.menu_state = original_menu; // Restore original state
         Ok(result)
     }
-    // fn prompt_yn(&mut self, prompt_text: &str) -> io::Result<Option<bool>> {
-    //     let original_menu = self.menu_state;
-    //     self.menu_state = MenuState::YesNoCancel;
-    //     self.status_time = None;
-    //     let mut result = None;
-    //
-    //     loop {
-    //         self.status_message = prompt_text.to_string();
-    //         self.draw_screen()?;
-    //
-    //         let (_, rows) = terminal::size()?;
-    //         let mut stdout = stdout();
-    //
-    //         let cursor_x = self.status_message.len();
-    //         queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
-    //         stdout.flush()?;
-    //
-    //         if let Event::Key(key) = event::read()? {
-    //             if key.kind != event::KeyEventKind::Press {
-    //                 continue;
-    //             }
-    //             match key.code {
-    //                 KeyCode::Char('y') | KeyCode::Char('Y') => {
-    //                     self.clear_status();
-    //                     result = Some(true);
-    //                     break;
-    //                 }
-    //                 KeyCode::Char('n') | KeyCode::Char('N') => {
-    //                     self.clear_status();
-    //                     result = Some(false);
-    //                     break;
-    //                 }
-    //                 KeyCode::Esc => {
-    //                     self.set_status(String::from("Cancelled"));
-    //                     break;
-    //                 }
-    //                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-    //                     self.set_status(String::from("Cancelled"));
-    //                     break;
-    //                 }
-    //                 _ => {}
-    //             }
-    //         }
-    //     }
-    //
-    //     self.menu_state = MenuState::Menu1;
-    //     self.menu_state = original_menu;
-    //     Ok(result)
-    // }
 
     fn prompt_replace(&mut self, prompt_text: &str) -> io::Result<Option<char>> {
         let original_menu = self.menu_state;
@@ -1365,37 +1071,6 @@ impl UiExt for Editor {
                 }
                 _ => {}
             }
-            // if let Event::Key(key) = event::read()? {
-            //     if key.kind != event::KeyEventKind::Press {
-            //         continue;
-            //     }
-            //     match key.code {
-            //         KeyCode::Char('y') | KeyCode::Char('Y') => {
-            //             self.clear_status();
-            //             result = Some('y');
-            //             break;
-            //         }
-            //         KeyCode::Char('n') | KeyCode::Char('N') => {
-            //             self.clear_status();
-            //             result = Some('n');
-            //             break;
-            //         }
-            //         KeyCode::Char('a') | KeyCode::Char('A') => {
-            //             self.clear_status();
-            //             result = Some('a');
-            //             break;
-            //         }
-            //         KeyCode::Esc => {
-            //             self.set_status(String::from("Cancelled"));
-            //             break;
-            //         }
-            //         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            //             self.set_status(String::from("Cancelled"));
-            //             break;
-            //         }
-            //         _ => {}
-            //     }
-            // }
         }
 
         self.menu_state = MenuState::Menu1;
@@ -1404,10 +1079,10 @@ impl UiExt for Editor {
     }
 
     fn run_file_browser(&mut self) -> io::Result<Option<String>> {
-        // Start with the current working directory as the default fallback
+        // start with the current working directory as the default fallback
         let mut current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-        // If a file is currently open, resolve its absolute path and target its parent directory
+        // if a file is currently open, resolve its absolute path and target its parent directory
         if let Some(ref fname) = self.filename {
             let path = std::path::Path::new(fname);
 
@@ -1641,7 +1316,7 @@ impl UiExt for Editor {
                                     let clicked_idx = scroll + (mouse.row as usize) - 1;
                                     if clicked_idx < entries.len() {
                                         if selected == clicked_idx {
-                                            // Act as a double-click if it's already selected
+                                            // act as a double-click if it's already selected
                                             trigger_enter = true;
                                         } else {
                                             selected = clicked_idx;
@@ -1765,9 +1440,6 @@ impl UiExt for Editor {
 
         let mut scroll_offset = 0;
 
-        // let theme = &self.theme_set.themes[&self.current_theme];
-        // let is_dark = Self::is_dark_theme(theme);
-
         let theme = &self.theme_set.themes[&self.current_theme];
         let colors = Self::get_theme_colors(theme);
 
@@ -1843,7 +1515,6 @@ impl UiExt for Editor {
                         // standard text
                         queue!(stdout, SetForegroundColor(theme_fg), Print(truncated))?;
                     }
-                    // ------------------------------
                 }
 
                 queue!(stdout, terminal::Clear(ClearType::UntilNewLine))?;
@@ -1943,48 +1614,6 @@ impl UiExt for Editor {
                 }
                 _ => {}
             }
-            // if let Event::Key(key) = event::read()? {
-            //     if key.kind != event::KeyEventKind::Press {
-            //         continue;
-            //     }
-            //     match key.code {
-            //         KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-            //         KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-            //         KeyCode::F(2) => break,
-            //         KeyCode::Esc => break,
-            //         KeyCode::Up => {
-            //             scroll_offset = scroll_offset.saturating_sub(1);
-            //         }
-            //         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            //             scroll_offset = scroll_offset.saturating_sub(1);
-            //         }
-            //         KeyCode::Down => {
-            //             if scroll_offset + visible_rows < help_lines.len() {
-            //                 scroll_offset += 1;
-            //             }
-            //         }
-            //         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            //             if scroll_offset + visible_rows < help_lines.len() {
-            //                 scroll_offset += 1;
-            //             }
-            //         }
-            //         KeyCode::PageUp | KeyCode::F(7) => {
-            //             scroll_offset = scroll_offset.saturating_sub(visible_rows);
-            //         }
-            //         KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            //             scroll_offset = scroll_offset.saturating_sub(visible_rows);
-            //         }
-            //         KeyCode::PageDown | KeyCode::F(8) => {
-            //             let max_offset = help_lines.len().saturating_sub(visible_rows);
-            //             scroll_offset = (scroll_offset + visible_rows).min(max_offset);
-            //         }
-            //         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            //             let max_offset = help_lines.len().saturating_sub(visible_rows);
-            //             scroll_offset = (scroll_offset + visible_rows).min(max_offset);
-            //         }
-            //         _ => {}
-            //     }
-            // }
         }
 
         self.clear_status();

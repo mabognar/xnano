@@ -1,4 +1,5 @@
 use crate::editor::Editor;
+
 use crossterm::style::Color;
 use syntect::highlighting::Theme;
 use std::env;
@@ -45,8 +46,6 @@ impl ConfigExt for Editor {
 
             self.status_message = format!("Theme changed to: {}", self.current_theme);
             self.status_time = Some(std::time::Instant::now());
-
-            // self.update_cursor_color();
         }
     }
 
@@ -110,26 +109,35 @@ impl ConfigExt for Editor {
             }
         }
 
-        if let Color::Rgb { r, g, b } = menu_hot_key {
-            let grey_shift = 80;
-
-            let (cursor_r, cursor_g, cursor_b) = if is_dark {
-                // lighten the cursor in dark mode
-                (r.saturating_sub(grey_shift), g.saturating_sub(grey_shift), b.saturating_sub(grey_shift))
+        if let Color::Rgb { r: _r, g: _g, b: _b } = menu_hot_key {
+            if is_dark {
+                print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", 100, 100, 100);
             } else {
-                // darken the cursor in light mode
-                (r.saturating_add(grey_shift), g.saturating_add(grey_shift), b.saturating_add(grey_shift))
-            };
-
-            print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", cursor_r, cursor_g, cursor_b);
-
-            // if is_dark {
-            //     print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", 120, 120, 120);
-            // } else {
-            //     print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", 180, 180, 180);
-            // }
+                print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", 180, 180, 180);
+            }
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
+
+        // if let Color::Rgb { r, g, b } = menu_hot_key {
+        //     let grey_shift = 80;
+        //
+        //     let (cursor_r, cursor_g, cursor_b) = if is_dark {
+        //         // lighten the cursor in dark mode
+        //         (r.saturating_sub(grey_shift), g.saturating_sub(grey_shift), b.saturating_sub(grey_shift))
+        //     } else {
+        //         // darken the cursor in light mode
+        //         (r.saturating_add(grey_shift), g.saturating_add(grey_shift), b.saturating_add(grey_shift))
+        //     };
+        //
+        //     print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", cursor_r, cursor_g, cursor_b);
+        //
+        //     // if is_dark {
+        //     //     print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", 100, 100, 100);
+        //     // } else {
+        //     //     print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", 180, 180, 180);
+        //     // }
+        //     let _ = std::io::Write::flush(&mut std::io::stdout());
+        // }
 
         UiColors { bg: editor_bg,
             fg: editor_fg,

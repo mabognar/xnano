@@ -1,3 +1,7 @@
+use crate::config::ConfigExt;
+use crate::spell::SpellExt;
+use crate::ui::UiExt;
+
 use std::collections::{HashSet, HashMap};
 use std::time::{Duration, Instant};
 use std::path::Path;
@@ -11,17 +15,9 @@ use crossterm::{
     execute, terminal,
     event::{self, Event, KeyCode, KeyModifiers, EnableMouseCapture, DisableMouseCapture, MouseEventKind, MouseButton}
 };
-// use crossterm::{execute, terminal, event::{self, Event, KeyCode, KeyModifiers}};
 use std::collections::BTreeSet;
-
-
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-
-// Pull in the trait definitions so this file knows about draw_screen, spell_check, etc.
-use crate::config::ConfigExt;
-use crate::spell::SpellExt;
-use crate::ui::UiExt;
 
 #[derive(PartialEq, Clone, Copy)]
 pub(crate) enum MenuState {
@@ -65,7 +61,7 @@ pub struct Editor {
     pub(crate) show_line_numbers: bool,
     pub(crate) soft_wrap: bool,
     pub(crate) previous_action_was_cut: bool,
-    pub(crate) escape_pending: bool, // Added escape tracker for macOS terminal fallback
+    pub(crate) escape_pending: bool,
     pub(crate) update_rx: Option<Receiver<String>>,
     pub(crate) update_version: Option<String>,
     pub line_marks: BTreeSet<usize>,
@@ -121,7 +117,7 @@ impl Editor {
         let (update_tx, update_rx) = mpsc::channel();
         thread::spawn(move || {
             let current_version = env!("CARGO_PKG_VERSION");
-            // GitHub API requires a User-Agent header
+            // GitHub API requires a user-agent header
             if let Ok(resp) = ureq::get("https://api.github.com/repos/mabognar/xnano/releases/latest")
                 .set("User-Agent", "xnano-update-checker")
                 .timeout(Duration::from_secs(3))
@@ -213,9 +209,6 @@ impl Editor {
         let mut stdout = io::stdout();
 
         execute!(stdout, terminal::EnterAlternateScreen, EnableMouseCapture)?;
-        // execute!(stdout, terminal::EnterAlternateScreen)?;
-
-        // self.update_cursor_color();
 
         loop {
             // check for update in background
@@ -268,11 +261,15 @@ impl Editor {
             }
         }
 
+        // flush any pending terminal events before exiting
+        while event::poll(Duration::from_millis(0))? {
+            let _ = event::read()?;
+        }
+
         execute!(stdout, DisableMouseCapture, terminal::LeaveAlternateScreen)?;
-        // execute!(stdout, terminal::LeaveAlternateScreen)?;
         terminal::disable_raw_mode()?;
 
-        // Reset cursor color on exit
+        // reset cursor color on exit
         print!("\x1b]112\x07");
         let _ = io::Write::flush(&mut io::stdout());
 
@@ -315,22 +312,22 @@ impl Editor {
                 }
             }
         } else {
-            // --- Vertical Scrolling ---
+            // vertical scrolling
             if self.cursor_y < self.row_offset {
                 self.row_offset = self.cursor_y;
             } else if self.cursor_y >= self.row_offset + visible_rows {
                 self.row_offset = self.cursor_y.saturating_sub(visible_rows.saturating_sub(1));
             }
 
-            // --- Horizontal Scrolling (1/2 Page at a time) ---
+            // horizontal scrolling --- 1/2 page at a time
             let visual_x = self.get_visual_cursor_x();
             let right_bound = self.col_offset + available_width;
 
             if visual_x < self.col_offset {
-                // Cursor moved off the left edge, jump left by half a screen
+                // cursor moved off the left edge, jump left by half a screen
                 self.col_offset = visual_x.saturating_sub(available_width / 2);
             } else if visual_x >= right_bound {
-                // Cursor moved off the right edge, jump right by half a screen
+                // cursor moved off the right edge, jump right by half a screen
                 self.col_offset = visual_x.saturating_sub(available_width / 2);
             }
         }
@@ -404,7 +401,7 @@ impl Editor {
             let start_char = mark_idx.min(cursor_idx);
             let end_char = mark_idx.max(cursor_idx);
 
-            // Always unmark, whether we delete something or not
+            // always unmark, whether we delete or not
             self.mark = None;
 
             if start_char != end_char {
@@ -413,7 +410,7 @@ impl Editor {
                 self.cursor_x = start_char - self.buffer.line_to_char(self.cursor_y);
                 self.desired_cursor_x = self.cursor_x;
                 self.mark_modified();
-                return true; // Indicates text was successfully deleted
+                return true; // text successfully deleted
             }
         }
         false
@@ -492,16 +489,15 @@ impl Editor {
 
 
     pub(crate) fn process_keypress(&mut self) -> io::Result<()> {
-        let event = event::read()?; // Read the event once
+        let event = event::read()?;
 
         match event {
             Event::Key(key) => {
-                // Ignore key release events on Windows
+                // ignore key release events on Windows
                 if key.kind != event::KeyEventKind::Press {
                     return Ok(());
                 }
 
-                // ... (KEEP ALL YOUR EXISTING KEY LOGIC HERE) ...
                 self.highlight_match = None;
 
                 let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -588,13 +584,6 @@ impl Editor {
                             _ => MenuState::Menu1,
                         };
                     }
-                    // KeyCode::Char('o') if is_alt => {
-                    //     self.menu_state = match self.menu_state {
-                    //         MenuState::Menu1 => MenuState::Menu2,
-                    //         MenuState::Menu2 => MenuState::Menu3,
-                    //         _ => MenuState::Menu1, // Loop back to page 1
-                    //     };
-                    // }
                     KeyCode::Char('v') if is_alt => {
                         if self.update_version.take().is_some() {
                             let _ = webbrowser::open("https://github.com/mabognar/xnano/releases/latest");
@@ -641,8 +630,7 @@ impl Editor {
                     KeyCode::Char(c) if !is_ctrl && !is_alt => {
                         let idx = self.get_cursor_char_idx();
 
-                        // --- 1. THE STEP-OVER ---
-                        // If we type a closing char and it matches what's directly to the right, just step over it
+                        // step-over --- if we type a closing char and it matches what's directly to the right, just step over it
                         let is_step_over = (c == ')' || c == ']' || c == '}' || c == '"' || c == '\'')
                             && idx < self.buffer.len_chars()
                             && self.buffer.char(idx) == c;
@@ -653,7 +641,7 @@ impl Editor {
                             self.snapshot();
                             self.delete_selection();
 
-                            // --- ELECTRIC CHARACTER LOGIC (from earlier) ---
+                            // electric character logic
                             if c == '}' || c == ']' || c == ')' {
                                 let line_start_char = self.buffer.line_to_char(self.cursor_y);
                                 let current_idx = self.get_cursor_char_idx();
@@ -673,14 +661,13 @@ impl Editor {
                                     }
                                 }
                             }
-                            // -----------------------------------------------
 
                             let final_idx = self.get_cursor_char_idx();
                             self.buffer.insert_char(final_idx, c);
                             self.cursor_x += 1;
                             self.desired_cursor_x = self.cursor_x;
 
-                            // --- 2. THE AUTO-CLOSE ---
+                            // auto-close
                             let closer = match c {
                                 '(' => Some(')'),
                                 '[' => Some(']'),
@@ -691,8 +678,7 @@ impl Editor {
                             };
 
                             if let Some(close_char) = closer {
-                                // Smart check: Only auto-close if the NEXT character is whitespace, punctuation, or EOF.
-                                // This prevents turning a word like "don't" into "don''t" when typing normally.
+                                // only auto-close if the next character is whitespace, punctuation, or EOF
                                 let next_idx = final_idx + 1;
                                 let next_char = if next_idx < self.buffer.len_chars() {
                                     self.buffer.char(next_idx)
@@ -706,7 +692,6 @@ impl Editor {
                                     self.buffer.insert_char(next_idx, close_char);
                                 }
                             }
-                            // -------------------------
 
                             self.mark_modified();
                         }
@@ -718,8 +703,7 @@ impl Editor {
 
                         let idx = self.get_cursor_char_idx();
 
-                        // indent code
-                        // read current line up to cursor
+                        // indent code --- read current line up to cursor
                         let line_start_char = self.buffer.line_to_char(self.cursor_y);
                         let text_before_cursor = self.buffer.slice(line_start_char..idx).to_string();
 
@@ -736,7 +720,7 @@ impl Editor {
                             }
                         }
 
-                        // Build the final string to insert
+                        // build the final string to insert
                         let mut payload = String::from('\n');
                         payload.push_str(&whitespace);
 
@@ -754,7 +738,7 @@ impl Editor {
                         if !self.delete_selection() {
                             let idx = self.get_cursor_char_idx();
                             if idx > 0 {
-                                // --- 3. THE PAIR DELETE ---
+                                // pair delete
                                 let char_behind = self.buffer.char(idx - 1);
                                 let char_at_cursor = if idx < self.buffer.len_chars() {
                                     Some(self.buffer.char(idx))
@@ -762,22 +746,22 @@ impl Editor {
                                     None
                                 };
 
-                                // Check if the cursor is perfectly sandwiched between an empty pair
+                                // check if the cursor is perfectly sandwiched between an empty pair
                                 let is_empty_pair = match (char_behind, char_at_cursor) {
                                     ('(', Some(')')) | ('[', Some(']')) | ('{', Some('}')) | ('"', Some('"')) | ('\'', Some('\'')) => true,
                                     _ => false,
                                 };
 
                                 if is_empty_pair {
-                                    // Delete BOTH the opener and the closer using a multi-character range
+                                    // delete both the open and the close using a multi-character range
                                     self.buffer.remove((idx - 1)..=idx);
                                 } else {
-                                    // Normal single-character delete
+                                    // single-character delete
                                     self.buffer.remove((idx - 1)..idx);
                                 }
                                 // --------------------------
 
-                                // Adjust the cursor exactly one space backward regardless of whether we deleted 1 or 2 chars
+                                // adjust the cursor exactly one space backward regardless of whether we deleted 1 or 2 chars
                                 self.cursor_y = self.buffer.char_to_line(idx - 1);
                                 self.cursor_x = (idx - 1) - self.buffer.line_to_char(self.cursor_y);
                                 self.desired_cursor_x = self.cursor_x;
@@ -800,33 +784,29 @@ impl Editor {
                 }
                 self.previous_action_was_cut = current_action_is_cut;
             }
-            // --- NEW MOUSE LOGIC ---
             Event::Mouse(mouse) => {
                 match mouse.kind {
-                    // 1. Mouse Wheel Scrolling
+                    // mouse wheel scrolling
                     MouseEventKind::ScrollUp => {
                         for _ in 0..3 { self.move_up(); }
                     }
                     MouseEventKind::ScrollDown => {
                         for _ in 0..3 { self.move_down(); }
                     }
-                    // 2. Left Click Actions
+                    // left click action
                     MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
                         let (cols, rows) = terminal::size()?;
 
-                        // --- A. MENU CLICK LOGIC ---
-                        // If they clicked on the bottom two rows (where the menu lives)
+                        // if clicked on the bottom two rows (where the menu lives)
                         if mouse.row >= rows.saturating_sub(2) {
 
-                            // We ONLY want to trigger a menu action on the initial click down.
-                            // If we don't check this, accidentally dragging the mouse across the menu
-                            // will fire off 20 commands in half a second!
+                            // only want to trigger a menu action on the initial click
                             if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
                                 let is_top_row = mouse.row == rows.saturating_sub(2);
                                 let col_width = (cols as usize) / 6;
                                 let col_idx = (mouse.column as usize) / col_width;
 
-                                // Reset the cut tracker for all buttons by default
+                                // reset the cut tracker for all buttons by default
                                 self.previous_action_was_cut = false;
 
                                 if col_idx < 6 {
@@ -834,16 +814,16 @@ impl Editor {
                                         MenuState::Menu1 => {
                                             if is_top_row {
                                                 match col_idx {
-                                                    0 => { self.save_file()?; } // ^O
-                                                    1 => { self.read_file()?; } // ^R
-                                                    2 => { self.justify(); }    // ^J
-                                                    3 => {                      // ^K
+                                                    0 => { self.save_file()?; }           // ^O
+                                                    1 => { self.read_file()?; }           // ^R
+                                                    2 => { self.justify(); }              // ^J
+                                                    3 => {                                        // ^K
                                                         self.cut_line();
                                                         self.previous_action_was_cut = true;
                                                         self.adjust_marks_on_delete(self.cursor_y);
                                                     }
-                                                    4 => { self.undo(); }       // M+U
-                                                    5 => { self.menu_state = MenuState::Menu2; } // M+O
+                                                    4 => { self.undo(); }                 // M+U
+                                                    5 => { self.menu_state = MenuState::Menu2; }  // M+O
                                                     _ => {}
                                                 }
                                             } else {
@@ -861,22 +841,22 @@ impl Editor {
                                         MenuState::Menu2 => {
                                             if is_top_row {
                                                 match col_idx {
-                                                    0 => { self.move_up(); }           // ^P
-                                                    1 => { self.page_up()?; }          // ^Y
-                                                    2 => { self.move_left(); }         // ^B
-                                                    3 => { self.move_word_left(); }    // M+B
+                                                    0 => { self.move_up(); }               // ^P
+                                                    1 => { self.page_up()?; }              // ^Y
+                                                    2 => { self.move_left(); }             // ^B
+                                                    3 => { self.move_word_left(); }        // M+B
                                                     4 => { self.move_to_start_of_line(); } // ^A
-                                                    5 => { self.menu_state = MenuState::Menu3; } // M+O
+                                                    5 => { self.menu_state = MenuState::Menu3; }  // M+O
                                                     _ => {}
                                                 }
                                             } else {
                                                 match col_idx {
-                                                    0 => { self.move_down(); }         // ^N
-                                                    1 => { self.page_down()?; }        // ^V
-                                                    2 => { self.move_right(); }        // ^F
-                                                    3 => { self.move_word_right(); }   // M+F
+                                                    0 => { self.move_down(); }           // ^N
+                                                    1 => { self.page_down()?; }          // ^V
+                                                    2 => { self.move_right(); }          // ^F
+                                                    3 => { self.move_word_right(); }     // M+F
                                                     4 => { self.move_to_end_of_line(); } // ^E
-                                                    5 => { self.show_help()?; }        // ^H
+                                                    5 => { self.show_help()?; }          // ^H
                                                     _ => {}
                                                 }
                                             }
@@ -884,11 +864,11 @@ impl Editor {
                                         MenuState::Menu3 => {
                                             if is_top_row {
                                                 match col_idx {
-                                                    0 => { self.cur_pos(); }      // ^C
-                                                    1 => { self.toggle_mark(); }  // M+A
-                                                    2 => { self.spell_check()?; } // ^T
-                                                    3 => { self.toggle_line_mark(); }  // M+M
-                                                    4 => { self.goto_prev_mark()?; }   // M+,
+                                                    0 => { self.cur_pos(); }             // ^C
+                                                    1 => { self.toggle_mark(); }         // M+A
+                                                    2 => { self.spell_check()?; }        // ^T
+                                                    3 => { self.toggle_line_mark(); }    // M+M
+                                                    4 => { self.goto_prev_mark()?; }     // M+,
                                                     5 => { self.menu_state = MenuState::Menu4; } // M+O
                                                     _ => {}
                                                 }
@@ -905,23 +885,23 @@ impl Editor {
                                         MenuState::Menu4 => {
                                             if is_top_row {
                                                 match col_idx {
-                                                    0 => {                                         // M+S
+                                                    0 => {                                        // M+S
                                                         self.soft_wrap = !self.soft_wrap;
                                                         self.save_config();
                                                         self.set_status(if self.soft_wrap { "Soft wrap enabled".into() } else { "Soft wrap disabled".into() });
                                                     }
-                                                    1 => { self.cycle_theme(); }           // M+T
-                                                    5 => { self.menu_state = MenuState::Menu1; }   // M+O
+                                                    1 => { self.cycle_theme(); }          // M+T
+                                                    5 => { self.menu_state = MenuState::Menu1; }  // M+O
                                                     _ => {}
                                                 }
                                             } else {
                                                 match col_idx {
-                                                    0 => {                             // M+L
+                                                    0 => {                                    // M+L
                                                         self.show_line_numbers = !self.show_line_numbers;
                                                         self.save_config();
                                                         self.set_status(if self.show_line_numbers { "Line numbers enabled".into() } else { "Line numbers disabled".into() });
                                                     }
-                                                    1 => {                             // M+V
+                                                    1 => {                                    // M+V
                                                         if self.update_version.is_some() {
                                                             let _ = webbrowser::open("https://github.com/mabognar/xnano/releases/latest");
                                                             self.set_status(String::from("Opened browser to download update."));
@@ -929,17 +909,16 @@ impl Editor {
                                                             self.set_status(String::from("xnano is the latest version"));
                                                         }
                                                     }
-                                                    5 => { self.show_help()?; }        // ^H
+                                                    5 => { self.show_help()?; }       // ^H
                                                     _ => {}
                                                 }
                                             }
                                         }
-                                        _ => {} // Fallback for other menu states (prompts, etc.)
+                                        _ => {}
                                     }
                                 }
                             }
                         }
-                        // --- B. TEXT AREA CLICK LOGIC ---
                         else {
                             let visible_rows = rows.saturating_sub(3) as u16;
 
@@ -959,7 +938,7 @@ impl Editor {
                                     let clicked_y = self.row_offset + (mouse.row.saturating_sub(1) as usize);
                                     let target_y = clicked_y.min(self.buffer.len_lines().saturating_sub(1));
 
-                                    // 1. Did they click inside the gutter?
+                                    // click inside the gutter?
                                     if mouse.column < gutter_width {
                                         // Only toggle on the initial click to prevent drag-spamming
                                         if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
@@ -972,7 +951,7 @@ impl Editor {
                                             }
                                         }
                                     }
-                                    // 2. Otherwise, they clicked the text area
+                                    // otherwise, clicked the text area
                                     else {
                                         let target_visual_x = self.col_offset + mouse.column.saturating_sub(gutter_width) as usize;
 
@@ -1000,56 +979,11 @@ impl Editor {
                                 }
                             }
                         }
-                        // // --- B. TEXT AREA CLICK LOGIC ---
-                        // else {
-                        //     let visible_rows = rows.saturating_sub(3) as u16;
-                        //
-                        //     if mouse.row > 0 && mouse.row <= visible_rows {
-                        //         if self.soft_wrap {
-                        //             self.set_status(String::from("Mouse jump disabled while Soft Wrap is active"));
-                        //         } else {
-                        //             let max_line_num_len = self.buffer.len_lines().to_string().len();
-                        //             let gutter_width = if self.show_line_numbers {
-                        //                 max_line_num_len + 2
-                        //             } else if !self.line_marks.is_empty() {
-                        //                 2
-                        //             } else {
-                        //                 0
-                        //             } as u16;
-                        //
-                        //             let clicked_y = self.row_offset + (mouse.row.saturating_sub(1) as usize);
-                        //             let target_y = clicked_y.min(self.buffer.len_lines().saturating_sub(1));
-                        //
-                        //             let target_visual_x = self.col_offset + mouse.column.saturating_sub(gutter_width) as usize;
-                        //
-                        //             let line = self.buffer.line(target_y);
-                        //             let mut current_visual_x = 0;
-                        //             let mut char_x = 0;
-                        //
-                        //             for ch in line.chars() {
-                        //                 if ch == '\n' || ch == '\r' { break; }
-                        //                 if current_visual_x >= target_visual_x { break; }
-                        //
-                        //                 if ch == '\t' {
-                        //                     current_visual_x += 4 - (current_visual_x % 4);
-                        //                 } else {
-                        //                     current_visual_x += 1;
-                        //                 }
-                        //                 char_x += 1;
-                        //             }
-                        //
-                        //             self.cursor_y = target_y;
-                        //             self.cursor_x = char_x;
-                        //             self.desired_cursor_x = self.cursor_x;
-                        //             self.highlight_match = None;
-                        //         }
-                        //     }
-                        // }
                     }
                     _ => {}
                 }
             }
-            _ => {} // Ignore terminal resize events (they redraw automatically)
+            _ => {}
         }
 
         self.scroll()?;
@@ -1075,11 +1009,11 @@ impl Editor {
                 self.last_search = Some(query.clone());
             }
 
-            // Compile the regex. If the user typed invalid regex syntax, let them know!
+            // compile the regex
             let re = match regex::Regex::new(&query) {
                 Ok(re) => re,
                 Err(_) => {
-                    self.set_status(String::from("Invalid regex pattern"));
+                    self.set_status(String::from("Invalid RegEx pattern"));
                     return Ok(());
                 }
             };
@@ -1088,8 +1022,8 @@ impl Editor {
             let mut matches_found = 0;
             let mut wrapped = false;
 
-            // If we are currently standing exactly on a match from a previous search,
-            // bump our search forward by 1 character so we can continue cycling.
+            // if we are currently standing exactly on a match from a previous search,
+            // bump our search forward by 1 character so we can continue cycling
             let initial_text = self.buffer.to_string();
             let initial_byte = self.buffer.char_to_byte(current_idx);
 
@@ -1109,7 +1043,7 @@ impl Editor {
                     let start_idx = self.buffer.byte_to_char(mat.start());
                     let end_idx = self.buffer.byte_to_char(mat.end());
 
-                    // Safely translate the found byte indices back to rope character coordinates
+                    // safely translate the found byte indices back to rope character coordinates
                     self.cursor_y = self.buffer.char_to_line(start_idx);
                     self.cursor_x = start_idx - self.buffer.line_to_char(self.cursor_y);
                     self.desired_cursor_x = self.cursor_x;
@@ -1118,7 +1052,7 @@ impl Editor {
                     let match_len = end_idx - start_idx;
                     self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
 
-                    // Prompt the user to keep searching or stop
+                    // prompt the user to keep searching or stop
                     let prompt_result = self.prompt_yn("Find next instance?");
 
                     self.highlight_match = None;
@@ -1126,23 +1060,23 @@ impl Editor {
 
                     if let Some(action) = prompt_result? {
                         if action {
-                            // User clicked Yes: advance past this match and loop again
+                            // Yes: advance past this match and loop again
                             current_idx = end_idx;
                             self.clear_status();
                         } else {
-                            // User clicked No: stop at the current cursor location
+                            // No: stop at the current cursor location
                             self.clear_status();
                             break;
                         }
                     } else {
-                        // User Cancelled: stop at the current cursor location
+                        // Cancelled: stop at the current cursor location
                         self.set_status(String::from("Search cancelled"));
                         break;
                     }
                 } else {
-                    // No matches found from the cursor position downwards
+                    // no matches found from the cursor position downwards
                     if current_idx > 0 && !wrapped {
-                        // Wrap to the top of the document and search again
+                        // wrap to the top of the document and search again
                         current_idx = 0;
                         wrapped = true;
                         self.set_status(String::from("Search wrapped to top"));
@@ -1159,139 +1093,13 @@ impl Editor {
         }
         Ok(())
     }
-    // pub(crate) fn where_is(&mut self) -> io::Result<()> {
-    //     let prompt_text = if let Some(ref last) = self.last_search {
-    //         format!("Search (RegEx) [{}]: ", last)
-    //     } else {
-    //         String::from("Search (RegEx): ")
-    //     };
-    //
-    //     if let Some(mut query) = self.prompt(&prompt_text, false)? {
-    //         if query.is_empty() {
-    //             if let Some(ref last) = self.last_search {
-    //                 query = last.clone();
-    //             } else {
-    //                 self.set_status(String::from("Cancelled"));
-    //                 return Ok(());
-    //             }
-    //         } else {
-    //             self.last_search = Some(query.clone());
-    //         }
-    //
-    //         // Compile the regex. If the user typed invalid regex syntax, let them know!
-    //         let re = match regex::Regex::new(&query) {
-    //             Ok(re) => re,
-    //             Err(_) => {
-    //                 self.set_status(String::from("Invalid regex pattern"));
-    //                 return Ok(());
-    //             }
-    //         };
-    //
-    //         let text = self.buffer.to_string();
-    //         let mut start_byte = self.buffer.char_to_byte(self.get_cursor_char_idx());
-    //
-    //         // If we are currently standing on a match, bump our search forward by 1 character
-    //         // so we can cycle through occurrences of the same word.
-    //         if let Some(mat) = re.find_at(&text, start_byte) {
-    //             if mat.start() == start_byte {
-    //                 let current_char = self.get_cursor_char_idx();
-    //                 if current_char < self.buffer.len_chars() {
-    //                     start_byte = self.buffer.char_to_byte(current_char + 1);
-    //                 }
-    //             }
-    //         }
-    //
-    //         if let Some(mat) = re.find_at(&text, start_byte) {
-    //             // Safely translate the found byte indices back to rope character coordinates
-    //             let absolute_pos = self.buffer.byte_to_char(mat.start());
-    //             self.cursor_y = self.buffer.char_to_line(absolute_pos);
-    //             self.cursor_x = absolute_pos - self.buffer.line_to_char(self.cursor_y);
-    //             self.desired_cursor_x = self.cursor_x;
-    //
-    //             let match_len = self.buffer.byte_to_char(mat.end()) - absolute_pos;
-    //             self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
-    //
-    //             self.clear_status();
-    //         } else {
-    //             // If not found from cursor downwards, wrap to the top of the file
-    //             if let Some(mat) = re.find(&text) {
-    //                 let absolute_pos = self.buffer.byte_to_char(mat.start());
-    //                 self.cursor_y = self.buffer.char_to_line(absolute_pos);
-    //                 self.cursor_x = absolute_pos - self.buffer.line_to_char(self.cursor_y);
-    //                 self.desired_cursor_x = self.cursor_x;
-    //
-    //                 let match_len = self.buffer.byte_to_char(mat.end()) - absolute_pos;
-    //                 self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
-    //
-    //                 self.set_status(String::from("Search wrapped to top"));
-    //             } else {
-    //                 self.set_status(format!("Pattern \"{}\" not found", query));
-    //             }
-    //         }
-    //     }
-    //     Ok(())
-    // }
-
-    // pub(crate) fn where_is(&mut self) -> io::Result<()> {
-    //     let prompt_text = if let Some(ref last) = self.last_search {
-    //         format!("Search [{}]: ", last)
-    //     } else {
-    //         String::from("Search: ")
-    //     };
-    //
-    //     if let Some(mut query) = self.prompt(&prompt_text, false)? {
-    //         if query.is_empty() {
-    //             if let Some(ref last) = self.last_search {
-    //                 query = last.clone();
-    //             } else {
-    //                 self.set_status(String::from("Cancelled"));
-    //                 return Ok(());
-    //             }
-    //         } else {
-    //             self.last_search = Some(query.clone());
-    //         }
-    //
-    //         let text = self.buffer.to_string();
-    //         let mut start_char = self.get_cursor_char_idx();
-    //
-    //         if text[start_char..].starts_with(&query) {
-    //             start_char += 1;
-    //         }
-    //
-    //         if let Some(pos) = text[start_char..].find(&query) {
-    //             let absolute_pos = start_char + pos;
-    //             self.cursor_y = self.buffer.char_to_line(absolute_pos);
-    //             self.cursor_x = absolute_pos - self.buffer.line_to_char(self.cursor_y);
-    //             self.desired_cursor_x = self.cursor_x;
-    //
-    //             let match_len = query.chars().count();
-    //             self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
-    //
-    //             self.clear_status();
-    //         } else {
-    //             if let Some(pos) = text.find(&query) {
-    //                 self.cursor_y = self.buffer.char_to_line(pos);
-    //                 self.cursor_x = pos - self.buffer.line_to_char(self.cursor_y);
-    //                 self.desired_cursor_x = self.cursor_x;
-    //
-    //                 let match_len = query.chars().count();
-    //                 self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
-    //
-    //                 self.set_status(String::from("Search wrapped to top"));
-    //             } else {
-    //                 self.set_status(format!("\"{}\" not found", query));
-    //             }
-    //         }
-    //     }
-    //     Ok(())
-    // }
 
     pub(crate) fn replace(&mut self) -> io::Result<()> {
         self.snapshot();
         let prompt_text = if let Some(ref last) = self.last_search {
-            format!("Search (to replace) [{}]: ", last)
+            format!("Search to replace (RegEx) [{}]: ", last)
         } else {
-            String::from("Search (to replace): ")
+            String::from("Search to replace (RegEx): ")
         };
 
         if let Some(mut query) = self.prompt(&prompt_text, false)? {
@@ -1309,7 +1117,7 @@ impl Editor {
             let re = match regex::Regex::new(&query) {
                 Ok(re) => re,
                 Err(_) => {
-                    self.set_status(String::from("Invalid regex pattern"));
+                    self.set_status(String::from("Invalid RegEx pattern"));
                     return Ok(());
                 }
             };
@@ -1333,8 +1141,7 @@ impl Editor {
                         self.desired_cursor_x = self.cursor_x;
                         self.scroll()?;
 
-                        // Execute the Regex replace on this specific match chunk.
-                        // This handles Regex capture groups (like $1, $2) perfectly.
+                        // execute the Regex replace on this specific match chunk
                         let matched_text = mat.as_str();
                         let expanded_replacement = re.replace(matched_text, replacement.as_str()).into_owned();
 
@@ -1401,107 +1208,6 @@ impl Editor {
         }
         Ok(())
     }
-    // pub(crate) fn replace(&mut self) -> io::Result<()> {
-    //     self.snapshot();
-    //     let prompt_text = if let Some(ref last) = self.last_search {
-    //         format!("Search (to replace) [{}]: ", last)
-    //     } else {
-    //         String::from("Search (to replace): ")
-    //     };
-    //
-    //     if let Some(mut query) = self.prompt(&prompt_text, false)? {
-    //         if query.is_empty() {
-    //             if let Some(ref last) = self.last_search {
-    //                 query = last.clone();
-    //             } else {
-    //                 self.set_status(String::from("Cancelled"));
-    //                 return Ok(());
-    //             }
-    //         } else {
-    //             self.last_search = Some(query.clone());
-    //         }
-    //
-    //         if let Some(replacement) = self.prompt("Replace with: ", false)? {
-    //             let mut current_idx = self.get_cursor_char_idx();
-    //             let mut changes_made = 0;
-    //             let mut replace_all = false;
-    //             let mut wrapped = false;
-    //
-    //             loop {
-    //                 let text = self.buffer.to_string();
-    //                 if let Some(pos) = text[current_idx..].find(&query) {
-    //                     let start_idx = current_idx + pos;
-    //                     let end_idx = start_idx + query.chars().count();
-    //
-    //                     self.cursor_y = self.buffer.char_to_line(start_idx);
-    //                     self.cursor_x = start_idx - self.buffer.line_to_char(self.cursor_y);
-    //                     self.desired_cursor_x = self.cursor_x;
-    //                     self.scroll()?;
-    //
-    //                     if replace_all {
-    //                         self.snapshot();
-    //                         self.buffer.remove(start_idx..end_idx);
-    //                         self.buffer.insert(start_idx, &replacement);
-    //                         current_idx = start_idx + replacement.chars().count();
-    //                         changes_made += 1;
-    //                         self.mark_modified();
-    //                         continue;
-    //                     }
-    //
-    //                     let match_len = query.chars().count();
-    //                     self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
-    //
-    //                     let prompt_result = self.prompt_replace("Replace this instance?");
-    //
-    //                     self.highlight_match = None;
-    //
-    //                     if let Some(action) = prompt_result? {
-    //                         match action {
-    //                             'y' => {
-    //                                 self.snapshot();
-    //                                 self.buffer.remove(start_idx..end_idx);
-    //                                 self.buffer.insert(start_idx, &replacement);
-    //                                 current_idx = start_idx + replacement.chars().count();
-    //                                 changes_made += 1;
-    //                                 self.mark_modified();
-    //                             }
-    //                             'n' => {
-    //                                 current_idx = end_idx;
-    //                             }
-    //                             'a' => {
-    //                                 self.snapshot();
-    //                                 replace_all = true;
-    //                                 self.buffer.remove(start_idx..end_idx);
-    //                                 self.buffer.insert(start_idx, &replacement);
-    //                                 current_idx = start_idx + replacement.chars().count();
-    //                                 changes_made += 1;
-    //                                 self.mark_modified();
-    //                             }
-    //                             _ => unreachable!()
-    //                         }
-    //                     } else {
-    //                         self.set_status(String::from("Cancelled"));
-    //                         return Ok(());
-    //                     }
-    //                 } else {
-    //                     if current_idx > 0 && !wrapped {
-    //                         current_idx = 0;
-    //                         wrapped = true;
-    //                     } else {
-    //                         break;
-    //                     }
-    //                 }
-    //             }
-    //
-    //             if changes_made > 0 {
-    //                 self.set_status(format!("Replaced {} occurrences", changes_made));
-    //             } else {
-    //                 self.set_status(String::from("No matches found"));
-    //             }
-    //         }
-    //     }
-    //     Ok(())
-    // }
 
     pub(crate) fn cur_pos(&mut self) {
         let line = self.cursor_y + 1;
@@ -1537,7 +1243,6 @@ impl Editor {
         }
 
         let mut end_line = self.cursor_y;
-        // Fix 1: Use <= max_y so the very last line of the file can be evaluated
         while end_line <= max_y && self.buffer.line(end_line).chars().any(|c| !c.is_whitespace()) {
             end_line += 1;
         }
@@ -1547,8 +1252,6 @@ impl Editor {
         }
 
         let start_char = self.buffer.line_to_char(start_line);
-        // Fix 2: Do not add + 1 to end_line. This stops the removal range exactly AT
-        // the start of the blank line, leaving the blank line perfectly intact.
         let end_char = if end_line < self.buffer.len_lines() {
             self.buffer.line_to_char(end_line)
         } else {
@@ -1576,7 +1279,6 @@ impl Editor {
                 current_line_len += word.len();
             }
         }
-        // This newline will correctly bridge the gap to the preserved blank line
         new_text.push('\n');
 
         self.buffer.remove(start_char..end_char);
@@ -1598,7 +1300,7 @@ impl Editor {
         self.snapshot();
         if self.buffer.len_chars() == 0 { return; }
 
-        // If a mark is active, cut the selected region
+        // if mark is active, cut the selected region
         if let Some(mark_idx) = self.mark {
             let cursor_idx = self.get_cursor_char_idx();
             let start_char = mark_idx.min(cursor_idx);
@@ -1623,7 +1325,7 @@ impl Editor {
                 self.mark_modified();
             }
         } else {
-            // No mark, do standard full-line cut
+            // no mark, do full-line cut
             let start_char = self.buffer.line_to_char(self.cursor_y);
             let end_char = if self.cursor_y + 1 < self.buffer.len_lines() {
                 self.buffer.line_to_char(self.cursor_y + 1)
@@ -1739,7 +1441,6 @@ impl Editor {
                     } else {
                         self.filename = Some(new_name);
 
-                        // --- NEW: Clear the cache so the UI applies the new syntax on next draw ---
                         self.highlight_cache.clear();
 
                         self.set_status(format!("Wrote {} lines", self.buffer.len_lines()));
@@ -1760,19 +1461,19 @@ impl Editor {
 
         let start_is_word = self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_';
 
-        // 1. If we are on a word, skip the rest of the word characters
+        // if we are on a word, skip the rest of the word characters
         if start_is_word {
             while idx < len && (self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
                 idx += 1;
             }
         }
 
-        // 2. Skip any spaces, punctuation, or newlines until the start of the next word
+        // skip any spaces, punctuation, or newlines until the start of the next word
         while idx < len && !(self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
             idx += 1;
         }
 
-        // Update cursor coordinates
+        // update cursor coordinates
         self.cursor_y = self.buffer.char_to_line(idx);
         self.cursor_x = idx - self.buffer.line_to_char(self.cursor_y);
         self.desired_cursor_x = self.cursor_x;
@@ -1782,25 +1483,25 @@ impl Editor {
         let mut idx = self.get_cursor_char_idx();
         if idx == 0 { return; }
 
-        idx -= 1; // Step back one character to begin evaluating
+        idx -= 1; // move back one character to begin evaluating
 
-        // 1. Skip backwards through any spaces, punctuation, or newlines
+        // skip backwards through any spaces, punctuation, or newlines
         while idx > 0 && !(self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
             idx -= 1;
         }
 
-        // 2. Skip backwards through the word characters to find the start of the word
+        // skip backwards through the word characters to find the start of the word
         while idx > 0 && (self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
             idx -= 1;
         }
 
-        // If we didn't hit the absolute beginning of the file, step forward one
+        // if we didn't hit the absolute beginning of the file, step forward one
         // to land on the first letter of the word.
         if idx > 0 || !(self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
             idx += 1;
         }
 
-        // Update cursor coordinates
+        // update cursor coordinates
         self.cursor_y = self.buffer.char_to_line(idx);
         self.cursor_x = idx - self.buffer.line_to_char(self.cursor_y);
         self.desired_cursor_x = self.cursor_x;
@@ -1822,16 +1523,16 @@ impl Editor {
             return Ok(());
         }
 
-        // Find the largest mark smaller than our current line, or wrap around to the highest mark
+        // find the largest mark smaller than our current line, or wrap around to the highest mark
         let prev = self.line_marks.range(..self.cursor_y).next_back()
             .or_else(|| self.line_marks.iter().next_back())
             .copied();
 
         if let Some(line) = prev {
             self.cursor_y = line;
-            self.cursor_x = 0; // Or keep current x if preferred
+            self.cursor_x = 0;
             self.desired_cursor_x = self.cursor_x;
-            self.scroll()?; // Use your existing scroll logic to update the viewport
+            self.scroll()?;
             self.set_status(String::from("Jumped to previous mark"));
         }
         Ok(())
@@ -1843,16 +1544,16 @@ impl Editor {
             return Ok(());
         }
 
-        // Find the smallest mark larger than our current line, or wrap around to the lowest mark
+        // find the smallest mark larger than our current line, or wrap around to the lowest mark
         let next = self.line_marks.range((self.cursor_y + 1)..).next()
             .or_else(|| self.line_marks.iter().next())
             .copied();
 
         if let Some(line) = next {
             self.cursor_y = line;
-            self.cursor_x = 0; // Or keep current x if preferred
+            self.cursor_x = 0;
             self.desired_cursor_x = self.cursor_x;
-            self.scroll()?; // Use your existing scroll logic to update the viewport
+            self.scroll()?;
             self.set_status(String::from("Jumped to next mark"));
         }
         Ok(())
@@ -1863,13 +1564,13 @@ impl Editor {
 
         for &mark in &self.line_marks {
             if mark < deleted_line {
-                // Marks above the cut line stay exactly where they are
+                // marks above the cut line stay exactly where they are
                 new_marks.insert(mark);
             } else if mark == deleted_line {
-                // Do nothing! The mark is simply deleted along with the line.
+                // delete mark along with the line.
                 continue;
             } else {
-                // Marks below the cut line shift up by 1 to follow their text
+                // marks below the cut line shift up by 1 to follow their text
                 new_marks.insert(mark - 1);
             }
         }
@@ -1878,25 +1579,25 @@ impl Editor {
     }
 
     pub(crate) fn snapshot(&mut self) {
-        // Save the current state of the buffer and cursor positions
+        // save the current state of the buffer and cursor positions
         self.undo_stack.push((self.buffer.clone(), self.cursor_x, self.cursor_y));
 
-        // Clear the redo stack because a new edit invalidates the alternate future
+        // clear the redo stack because a new edit invalidates the alternate future
         self.redo_stack.clear();
     }
 
     pub(crate) fn undo(&mut self) {
         if let Some((old_buffer, old_x, old_y)) = self.undo_stack.pop() {
-            // 1. Save our current reality to the redo stack
+            // save our current reality to the redo stack
             self.redo_stack.push((self.buffer.clone(), self.cursor_x, self.cursor_y));
 
-            // 2. Restore the past
+            // restore the past
             self.buffer = old_buffer;
             self.cursor_x = old_x;
             self.cursor_y = old_y;
             self.desired_cursor_x = old_x;
 
-            // 3. Update the UI
+            // update the UI
             self.mark_modified();
             self.set_status(String::from("Undo"));
         } else {
@@ -1906,16 +1607,16 @@ impl Editor {
 
     pub(crate) fn redo(&mut self) {
         if let Some((new_buffer, new_x, new_y)) = self.redo_stack.pop() {
-            // 1. Save our current reality back to the undo stack
+            // save current reality back to the undo stack
             self.undo_stack.push((self.buffer.clone(), self.cursor_x, self.cursor_y));
 
-            // 2. Restore the alternate future
+            // restore the alternate future
             self.buffer = new_buffer;
             self.cursor_x = new_x;
             self.cursor_y = new_y;
             self.desired_cursor_x = new_x;
 
-            // 3. Update the UI
+            // update the UI
             self.mark_modified();
             self.set_status(String::from("Redo"));
         } else {

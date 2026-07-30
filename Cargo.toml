@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 keywords = ["text", "editor", "terminal", "tui", "syntax"]
 categories = ["text-editors"]
-description = "Efficient, fast text editor with syntax highlighting, themes, spellcheck. Written from the ground-up in Rust. Tested with macOS, Linux, Windows, BSD."
+description = "Terminal text editor - efficient, easy-to-use, modern features. Tested with macOS, Linux, Windows, BSD."
 readme = true
 documentation = "https://docs.rs/xnano"
 repository = "https://github.com/mabognar/xnano"
@@ -26,7 +26,7 @@ copyright = "2024, Matthew Bognar"
 license-file = ["LICENSE", "4"]
 depends = "$auto"
 extended-description = """
-Efficient, fast text editor with syntax highlighting, themes, spellcheck. Written from the ground-up in Rust.
+Terminal text editor - efficient, easy-to-use, modern features.
 """
 section = "text editor"
 priority = "optional"
