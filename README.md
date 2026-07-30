@@ -1,5 +1,5 @@
 # xnano
-xnano is a terminal text editor - efficient, easy-to-use, with modern features 
+xnano is a terminal text editor - efficient, easy-to-use, mouse support, modern features  
 
 <img width="852" height="700" alt="xnano1" src="https://github.com/user-attachments/assets/479e8c56-5a40-4312-abf8-1fed286b20b7" />
 <img width="852" height="700" alt="xnano2" src="https://github.com/user-attachments/assets/1c4ea614-51ed-467b-b7bf-d16f84ae9b25" />
