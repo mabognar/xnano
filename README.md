@@ -1,6 +1,5 @@
 # xnano
-xnano is a fast, efficient text editor written from the ground-up in Rust. Includes syntax highlighting, themes, update checker, soft line-wrap, 
-line numbers, etc. 
+xnano is a terminal text editor - efficient, easy-to-use, with modern features 
 
 <img width="852" height="700" alt="xnano1" src="https://github.com/user-attachments/assets/b53f50da-3f7c-472e-a2dc-2df6562d2d41" />
 <img width="852" height="700" alt="xnano2" src="https://github.com/user-attachments/assets/c75fd1be-8d2f-4f0b-baf5-9a551e9ed2bb" />
@@ -13,7 +12,7 @@ https://github.com/mabognar/xnano/releases/latest
 ````
 
 ## Build
-In suitable directory, run
+If you have Rust installed, in suitable directory run
 ```
 git clone https://github.com/mabognar/xnano
 cd xnano
@@ -27,11 +26,9 @@ cargo install xnano
 
 ## Help
 ### Themes & Configuration: 
-    - To cycle through the included themes, type Meta+T (ALT+T,
-      Option+T) when in editor
     - On MacOS, make sure you have 'Use Option as Meta' selected 
       in your terminal settings
-    - Theme, line numbers, soft wrap are persistent
+    - Mouse is supported for some actions
     - Settings are stored in ~/.xnano/xnanorc
     - Themes are stored in ~/.xnano/themes
     - Additional .tmTheme themes can be added to ~/.xnano/themes
@@ -44,6 +41,9 @@ cargo install xnano
     Ctrl+E           Move to end of line
     Ctrl+Y, F7, PgUp Move up one page
     Ctrl+V, F8, PgDn Move down one page
+    Meta+M           Mark line
+    Meta+,           Move to previous mark
+    Meta.,           Move to next mark
 ### Editing:
     Ctrl+K, F9       Cut current line into clipboard
     Ctrl+U, F10      Paste contents of clipboard
@@ -54,6 +54,8 @@ cargo install xnano
     Ctrl+^, Meta+A   Mark beginning of selected text.
                      This key also unselects text.
                      Note: Ctrl+^ = Ctrl+Shift+6
+    Meta+U           Undo
+    Meta+R           Redo
 ### Search & Replace:
     Ctrl+W, F6       Where is (Search)
     Ctrl+\           Search and Replace
