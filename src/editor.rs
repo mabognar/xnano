@@ -215,7 +215,7 @@ impl Editor {
             if let Some(rx) = &self.update_rx {
                 if let Ok(version) = rx.try_recv() {
                     self.update_version = Some(version.clone());
-                    self.set_status(format!("Press Meta+U (Alt+U) to update xnano to version {}", version));
+                    self.set_status(format!("Press Meta+V (Alt+V) to update xnano to version {}", version));
                     self.update_rx = None; // Stop checking
                 }
             }
@@ -585,11 +585,10 @@ impl Editor {
                         };
                     }
                     KeyCode::Char('v') if is_alt => {
-                        if self.update_version.take().is_some() {
+                        if self.update_version.is_some() {
                             let _ = webbrowser::open("https://github.com/mabognar/xnano/releases/latest");
                             self.set_status(String::from("Opened browser to download update."));
                         } else {
-                            // Optional: Give feedback if they press it when no update is available
                             self.set_status(String::from("xnano is the latest version"));
                         }
                     }
