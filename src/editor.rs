@@ -65,6 +65,7 @@ pub struct Editor {
     pub(crate) update_rx: Option<Receiver<String>>,
     pub(crate) update_version: Option<String>,
     pub line_marks: BTreeSet<usize>,
+    pub(crate) mouse_enabled: bool,
 }
 
 impl Editor {
@@ -109,7 +110,7 @@ impl Editor {
             String::new()
         };
 
-        let (mut starting_theme, line_numbers, soft_wrap) = Self::load_config();
+        let (mut starting_theme, line_numbers, soft_wrap, mouse_enabled) = Self::load_config();
         if !theme_set.themes.contains_key(&starting_theme) {
             starting_theme = String::from("base16-ocean.dark");
         }
@@ -167,6 +168,7 @@ impl Editor {
             update_rx: Some(update_rx),
             update_version: None,
             line_marks: BTreeSet::new(),
+            mouse_enabled,
         }
     }
 
@@ -208,7 +210,11 @@ impl Editor {
         terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
 
-        execute!(stdout, terminal::EnterAlternateScreen, EnableMouseCapture)?;
+        // Split the execute macro into two parts
+        execute!(stdout, terminal::EnterAlternateScreen)?;
+        if self.mouse_enabled {
+            execute!(stdout, EnableMouseCapture)?;
+        }
 
         loop {
             // check for update in background
@@ -557,7 +563,9 @@ impl Editor {
                     KeyCode::Char('t') if is_ctrl => self.spell_check()?,
                     KeyCode::F(12) if key.modifiers.contains(KeyModifiers::NONE) => self.spell_check()?,
 
-                    KeyCode::Char('c') if is_ctrl => self.cur_pos(),
+                    KeyCode::Char('c') if is_ctrl => self.copy_selection(),
+                    KeyCode::Char('c') if is_alt => self.cur_pos(),
+
                     KeyCode::F(11) if key.modifiers.contains(KeyModifiers::NONE) => self.cur_pos(),
 
                     KeyCode::Char('l') if is_ctrl => self.go_to_line()?,
@@ -569,6 +577,7 @@ impl Editor {
                         self.save_config();
                         self.set_status(if self.show_line_numbers { "Line numbers enabled".into() } else { "Line numbers disabled".into() });
                     }
+                    KeyCode::Char('e') if is_alt => self.toggle_mouse(),
 
                     KeyCode::Char('s') if is_alt => {
                         self.soft_wrap = !self.soft_wrap;
@@ -968,6 +977,17 @@ impl Editor {
                                                 current_visual_x += 1;
                                             }
                                             char_x += 1;
+
+                                            if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
+                                                // A standard click clears any existing selection
+                                                self.mark = None;
+                                            } else if mouse.kind == event::MouseEventKind::Drag(event::MouseButton::Left) {
+                                                // Dragging starts a selection from the cursor's current position
+                                                // (where the click started) if we don't already have one active
+                                                if self.mark.is_none() {
+                                                    self.mark = Some(self.get_cursor_char_idx());
+                                                }
+                                            }
                                         }
 
                                         self.cursor_y = target_y;
@@ -1350,22 +1370,31 @@ impl Editor {
             self.set_status(String::from("Cut line"));
             self.mark_modified();
         }
+
+        if let Ok(mut ctx) = arboard::Clipboard::new() {
+            let _ = ctx.set_text(self.clipboard.clone());
+        }
     }
 
     pub(crate) fn paste_line(&mut self) {
         self.snapshot();
+
+        // 1. Try to sync FROM the OS clipboard first
+        if let Ok(mut ctx) = arboard::Clipboard::new() {
+            if let Ok(os_text) = ctx.get_text() {
+                self.clipboard = os_text;
+            }
+        }
+
         if self.clipboard.is_empty() { return; }
 
         self.delete_selection();
-
         let current_char = self.get_cursor_char_idx();
         self.buffer.insert(current_char, &self.clipboard);
-
         let new_idx = current_char + self.clipboard.chars().count();
         self.cursor_y = self.buffer.char_to_line(new_idx);
         self.cursor_x = new_idx - self.buffer.line_to_char(self.cursor_y);
         self.desired_cursor_x = self.cursor_x;
-
         self.set_status(String::from("Pasted text"));
         self.mark_modified();
     }
@@ -1621,6 +1650,55 @@ impl Editor {
         } else {
             self.set_status(String::from("Nothing to redo"));
         }
+    }
+
+    pub(crate) fn copy_selection(&mut self) {
+        if self.buffer.len_chars() == 0 { return; }
+
+        if let Some(mark_idx) = self.mark {
+            let cursor_idx = self.get_cursor_char_idx();
+            let start_char = mark_idx.min(cursor_idx);
+            let end_char = mark_idx.max(cursor_idx);
+
+            if start_char != end_char {
+                let copy_text = self.buffer.slice(start_char..end_char).to_string();
+                self.clipboard = copy_text;
+                self.mark = None;
+                self.set_status(String::from("Copied selection"));
+            } else {
+                self.set_status(String::from("Nothing to copy"));
+            }
+        } else {
+            let start_char = self.buffer.line_to_char(self.cursor_y);
+            let end_char = if self.cursor_y + 1 < self.buffer.len_lines() {
+                self.buffer.line_to_char(self.cursor_y + 1)
+            } else {
+                self.buffer.len_chars()
+            };
+            let copy_text = self.buffer.slice(start_char..end_char).to_string();
+            self.clipboard = copy_text;
+            self.set_status(String::from("Copied line"));
+        }
+
+        // sync to the OS clipboard
+        if let Ok(mut ctx) = arboard::Clipboard::new() {
+            let _ = ctx.set_text(self.clipboard.clone());
+        }
+    }
+
+    pub(crate) fn toggle_mouse(&mut self) {
+        self.mouse_enabled = !self.mouse_enabled;
+        let mut stdout = io::stdout();
+
+        if self.mouse_enabled {
+            let _ = execute!(stdout, EnableMouseCapture);
+            self.set_status(String::from("Mouse capture enabled"));
+        } else {
+            let _ = execute!(stdout, DisableMouseCapture);
+            self.set_status(String::from("Mouse capture disabled (native OS copy/paste enabled)"));
+        }
+
+        self.save_config();
     }
 }
 

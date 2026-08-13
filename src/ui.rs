@@ -503,12 +503,21 @@ impl UiExt for Editor {
 
         match self.menu_state {
             MenuState::Menu1 => {
+                // evaluate the cut label dynamically
+                let cut_label = if self.mark.is_some() {
+                    " Cut Sel"
+                } else {
+                    " Cut Line"
+                };
                 let menu1 = [
-                    ("^O", " Write Out"), ("^R", " Read File"), ("^J", " Justify"), ("^K", " Cut Txt"), ("M+U", " Undo"), ("M+O", " Other 1/4") // Updated
+                    ("^O", " Write Out"), ("^R", " Read File"), ("^J", " Justify"),
+                    ("^K", cut_label),
+                    ("M+U", " Undo"), ("M+O", " Other 1/4")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
+
                 let menu2 = [
-                    ("^X", " Exit"), ("^W", " Where Is"), ("^\\", " Replace"), ("^U", " UnCut Txt"), ("M+R", " Redo"), (" ^H", " Help")
+                    ("^X", " Exit"), ("^W", " Where Is"), ("^\\", " Replace"), ("^U", " Paste"), ("M+R", " Redo"), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
@@ -523,21 +532,26 @@ impl UiExt for Editor {
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
             MenuState::Menu3 => {
+                // evaluate the copy label dynamically
+                let copy_label = if self.mark.is_some() {
+                    " Copy Sel"
+                } else {
+                    " Copy Ln"
+                };
                 let menu1 = [
-                    ("^C", " Cur Pos"), ("M+A", " Mark Beg"), ("^T", " To Spell"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 3/4") // Updated
+                    ("M+A", " Mark Beg"), ("M+C", " Cur Pos"), ("^T", " To Spell"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 3/4") // Updated
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
                 let menu2 = [
-                    ("^L", " To Line"), (" ^D", " Delete"), ("", ""), ("", ""), ("M+.", " Next Mrk"), (" ^H", " Help")
+                    (" ^C", copy_label), (" ^L", " To Line"), ("^D", " Delete"), ("", ""), ("M+.", " Next Mrk"), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
             MenuState::Menu4 => {
                 let menu1 = [
-                    ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("", ""), ("", ""), ("", ""), ("M+O", " Other 4/4")
+                    ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("M+E", " Mouse"), ("", ""), ("", ""), ("M+O", " Other 4/4")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
-
                 let menu2 = [
                     ("M+L", " Line Num"), ("M+V", " Update"), ("", ""), ("", ""), ("", ""), (" ^H", " Help")
                 ];
@@ -1404,6 +1418,7 @@ impl UiExt for Editor {
             "  Editing:",
             "    M+U                   Undo last action",
             "    M+R                   Redo last undone action",
+            "    ^C         Copy marked text or current line",
             "    ^K, F9     Cut current line into clipboard",
             "    ^U, F10    Paste contents of clipboard",
             "    ^D, Del    Delete character under cursor",
@@ -1425,7 +1440,7 @@ impl UiExt for Editor {
             "    ^X, F2  Exit xnano",
             "",
             "  Tools:",
-            "    ^C, F11  Current Position",
+            "    M+C, F11   Current Position",
             "    ^L       Go to line number",
             "    ^T, F12  To Spell (Spell check)",
             "             Does NOT work in Windows",
@@ -1433,6 +1448,7 @@ impl UiExt for Editor {
             "    M+L      Toggle Line Numbers",
             "    M+S      Toggle Soft Wrap",
             "    M+O      Toggle Menu Pages",
+            "    M+E      Toggle Mouse Capture",
             " ",
             "  Written by: Matt Bognar, https://github.com/mabognar",
             " ",

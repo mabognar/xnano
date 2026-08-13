@@ -27,7 +27,7 @@ pub trait ConfigExt {
     fn get_config_path() -> Option<PathBuf>;
     fn get_themes_dir() -> Option<PathBuf>;
     fn initialize_themes() -> std::io::Result<()>;
-    fn load_config() -> (String, bool, bool);
+    fn load_config() -> (String, bool, bool, bool);
     fn save_config(&self);
     // fn update_cursor_color(&self);
 }
@@ -185,10 +185,11 @@ impl ConfigExt for Editor {
         Ok(())
     }
 
-    fn load_config() -> (String, bool, bool) {
+    fn load_config() -> (String, bool, bool, bool) {
         let mut theme = String::from("base16-ocean.dark");
         let mut line_numbers = false;
         let mut soft_wrap = false;
+        let mut mouse_enabled = false; // <-- Default to false for first install!
 
         if let Some(path) = Self::get_config_path() {
             if let Ok(content) = fs::read_to_string(path) {
@@ -199,23 +200,24 @@ impl ConfigExt for Editor {
                             "theme" => theme = parts[1].to_string(),
                             "line_numbers" => line_numbers = parts[1] == "true",
                             "soft_wrap" => soft_wrap = parts[1] == "true",
+                            "mouse_enabled" => mouse_enabled = parts[1] == "true", // <-- Read setting
                             _ => {}
                         }
                     }
                 }
             }
         }
-        (theme, line_numbers, soft_wrap)
+        (theme, line_numbers, soft_wrap, mouse_enabled)
     }
 
     fn save_config(&self) {
         if let Some(path) = Self::get_config_path() {
             let content = format!(
-                "theme={}\nline_numbers={}\nsoft_wrap={}\n",
-                self.current_theme, self.show_line_numbers, self.soft_wrap
+                "theme={}\nline_numbers={}\nsoft_wrap={}\nmouse_enabled={}\n",
+                self.current_theme, self.show_line_numbers, self.soft_wrap, self.mouse_enabled
             );
             let _ = fs::write(path, content);
         }
     }
-
+    
 }
