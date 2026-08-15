@@ -16,21 +16,26 @@ use std::fs;
 use std::path::PathBuf;
 
 pub trait UiExt {
+    fn clear_status(&mut self);
     fn draw_menu_line(writer: &mut io::Stdout, row: u16, cols: u16, col_width: usize,
                       items: &[(&str, &str)], ui_bg: Color, key_fg: Color, text_fg: Color) -> io::Result<()>;
     fn draw_screen(&mut self) -> io::Result<()>;
+    fn get_soft_wrap_metrics(line_chars: &[char], target_visual_x: Option<usize>, available_width: usize) -> (usize, usize, usize);
     fn inline_prompt(&self, prefix: &str, initial_input: &str) -> io::Result<Option<String>>;
     fn prompt(&mut self, prompt_text: &str, allow_browser: bool) -> io::Result<Option<String>>;
     fn prompt_yn(&mut self, prompt_text: &str) -> io::Result<Option<bool>>;
     fn prompt_replace(&mut self, prompt_text: &str) -> io::Result<Option<char>>;
     fn run_file_browser(&mut self) -> io::Result<Option<String>>;
-    fn show_help(&mut self) -> io::Result<()>;
     fn set_status(&mut self, message: String);
-    fn clear_status(&mut self);
-    fn get_soft_wrap_metrics(line_chars: &[char], target_visual_x: Option<usize>, available_width: usize) -> (usize, usize, usize);
+    fn show_help(&mut self) -> io::Result<()>;
 }
 
 impl UiExt for Editor {
+    fn clear_status(&mut self) {
+        self.status_message.clear();
+        self.status_time = None;
+    }
+
     fn draw_menu_line(
         writer: &mut io::Stdout,
         row: u16,
@@ -122,7 +127,7 @@ impl UiExt for Editor {
         let cursor_str = format!("   L:{} C:{}", self.cursor_y + 1, self.cursor_x + 1);
 
         // Calculate the exact space needed on the right side: cursor string + " SLM" (4 chars total: 1 space + 3 letters)
-        let indicators_len = cursor_str.chars().count() + 4;
+        let indicators_len = cursor_str.chars().count() + 5;
 
         let max_allowable_len = (cols as usize).saturating_sub(indicators_len);
         let full_len = title.chars().count() + file_section.chars().count() + mod_star.chars().count();
@@ -159,6 +164,7 @@ impl UiExt for Editor {
         let s_color = if self.soft_wrap { colors.indicator } else { inactive_color };
         let l_color = if self.show_line_numbers { colors.indicator } else { inactive_color };
         let m_color = if !self.line_marks.is_empty() { colors.indicator } else { inactive_color };
+        let e_color = if self.mouse_enabled { colors.indicator } else { inactive_color };
 
         queue!(
             stdout,
@@ -179,6 +185,8 @@ impl UiExt for Editor {
             Print("L"),
             SetForegroundColor(m_color),
             Print("M"),
+            SetForegroundColor(e_color),
+            Print("E"),
             // Reset colors for the rest of the screen
             SetForegroundColor(Color::Reset),
             SetBackgroundColor(Color::Reset)
@@ -359,7 +367,7 @@ impl UiExt for Editor {
                             let is_start_of_word = line_char_idx > 0
                                 && line_chars.get(line_char_idx - 1).map_or(false, |c| c.is_whitespace())
                                 && !ch.is_whitespace();
-                            
+
                             if is_start_of_word {
                                 let mut word_width = 0;
                                 let mut peek_idx = line_char_idx;
@@ -503,57 +511,64 @@ impl UiExt for Editor {
 
         match self.menu_state {
             MenuState::Menu1 => {
-                // evaluate the cut label dynamically
+
                 let cut_label = if self.mark.is_some() {
                     " Cut Sel"
                 } else {
                     " Cut Line"
                 };
+
+                let copy_label = if self.mark.is_some() {
+                    " Copy Sel"
+                } else {
+                    " Copy Line"
+                };
+
+                let mark_label = if self.mark.is_some() {
+                    " Unmark"
+                } else {
+                    " Mark Beg"
+                };
+
                 let menu1 = [
                     ("^O", " Write Out"), ("^R", " Read File"), ("^J", " Justify"),
-                    ("^K", cut_label),
-                    ("M+U", " Undo"), ("M+O", " Other 1/4")
+                    ("^K", cut_label), ("M+A", mark_label),
+                    ("M+O", " Other 1/4")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
                 let menu2 = [
-                    ("^X", " Exit"), ("^W", " Where Is"), ("^\\", " Replace"), ("^U", " Paste"), ("M+R", " Redo"), (" ^H", " Help")
+                    ("^X", " Exit"), ("^W", " Where Is"), ("^\\", " Replace"), ("^C", copy_label), (" ^V", " Paste"), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
             MenuState::Menu2 => {
                 let menu1 = [
-                    ("^P", " Prv Lne"), ("^Y", " Prev Pg"), ("^B", " Back Chr"), ("M+B", " Back Wrd"), ("^A", " Beg Line"), ("M+O", " Other 2/4") // Updated
+                    ("M+U", " Undo"), ("M+C", " Cur Pos"), ("^T", " To Spell"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 2/4")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
                 let menu2 = [
-                    ("^N", " Nxt Line"), ("^V", " Next Pg"), ("^F", " Frwd Chr"), ("M+F", " Frwd Wrd"), ("^E", " End Line"), (" ^H", " Help")
+                    ("M+R", " Redo"), (" ^L", " To Line"), ("^D", " Delete"), ("", ""), ("M+.", " Next Mrk"), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
             MenuState::Menu3 => {
-                // evaluate the copy label dynamically
-                let copy_label = if self.mark.is_some() {
-                    " Copy Sel"
-                } else {
-                    " Copy Ln"
-                };
                 let menu1 = [
-                    ("M+A", " Mark Beg"), ("M+C", " Cur Pos"), ("^T", " To Spell"), ("M+M", " Line Mrk"), ("M+,", " Prev Mrk"), ("M+O", " Other 3/4") // Updated
+                    ("^P", " Prv Lne"), ("  ^Y", " Prv Pg"), ("^B", " Back Chr"), ("M+B", " Back Wrd"), ("^A", " Beg Line"), ("M+O", " Other 3/4")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
                 let menu2 = [
-                    (" ^C", copy_label), (" ^L", " To Line"), ("^D", " Delete"), ("", ""), ("M+.", " Next Mrk"), (" ^H", " Help")
+                    ("^N", " Nxt Line"), ("^Spc", " Nxt Pg"), ("^F", " Frwd Chr"), ("M+F", " Frwd Wrd"), ("^E", " End Line"), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
             MenuState::Menu4 => {
                 let menu1 = [
-                    ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("M+E", " Mouse"), ("", ""), ("", ""), ("M+O", " Other 4/4")
+                    ("M+S", " Soft Wrp"), ("M+T", " Theme"), ("", ""), ("", ""), ("M+V", " Update"), ("M+O", " Other 4/4")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
                 let menu2 = [
-                    ("M+L", " Line Num"), ("M+V", " Update"), ("", ""), ("", ""), ("", ""), (" ^H", " Help")
+                    ("M+L", " Line Num"), ("M+E", " Mouse"), ("", ""), ("", ""), ("", ""), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
@@ -647,6 +662,77 @@ impl UiExt for Editor {
         queue!(stdout, cursor::MoveTo(safe_screen_x as u16, safe_screen_y as u16))?;
         stdout.flush()?;
         Ok(())
+    }
+
+    fn get_soft_wrap_metrics(line_chars: &[char], target_visual_x: Option<usize>, available_width: usize) -> (usize, usize, usize) {
+        let mut current_y = 0;
+        let mut current_x = 0;
+        let mut target_y = 0;
+        let mut target_x = 0;
+        let mut visual_x = 0;
+
+        for (i, &ch) in line_chars.iter().enumerate() {
+            let is_start_of_word = i > 0 && line_chars[i - 1].is_whitespace() && !ch.is_whitespace();
+            if is_start_of_word && current_x > 0 && current_x < available_width {
+                let mut word_width = 0;
+                let mut peek_idx = i;
+                while peek_idx < line_chars.len() && !line_chars[peek_idx].is_whitespace() {
+                    word_width += 1;
+                    peek_idx += 1;
+                }
+                if current_x + word_width > available_width {
+                    current_x = available_width; // Force wrap
+                }
+            }
+
+            // skip spaces that would appear at the start of a wrapped line
+            let is_wrap_space = (current_x == 0 || current_x >= available_width) && i > 0 && ch.is_whitespace();
+            let display_chars = if ch == '\t' { 4 - (visual_x % 4) } else { 1 };
+
+            if is_wrap_space {
+                // cursor tracking
+                for _ in 0..display_chars {
+                    if Some(visual_x) == target_visual_x {
+                        target_y = if current_x >= available_width { current_y + 1 } else { current_y };
+                        target_x = 0;
+                    }
+                    visual_x += 1;
+                }
+                continue;
+            }
+
+            for _ in 0..display_chars {
+                if Some(visual_x) == target_visual_x {
+                    if current_x >= available_width {
+                        target_y = current_y + 1;
+                        target_x = 0;
+                    } else {
+                        target_y = current_y;
+                        target_x = current_x;
+                    }
+                }
+
+                if current_x >= available_width {
+                    current_y += 1;
+                    current_x = 0;
+                }
+
+                current_x += 1;
+                visual_x += 1;
+            }
+        }
+
+        if Some(visual_x) == target_visual_x {
+            if current_x >= available_width {
+                target_y = current_y + 1;
+                target_x = 0;
+            } else {
+                target_y = current_y;
+                target_x = current_x;
+            }
+        }
+
+        (current_y + 1, target_y, target_x)
     }
 
     fn inline_prompt(&self, prefix: &str, initial_input: &str) -> io::Result<Option<String>> {
@@ -969,7 +1055,7 @@ impl UiExt for Editor {
                         continue;
                     }
                     match key.code {
-                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                             self.clear_status();
                             result = Some(true);
                             break;
@@ -1387,6 +1473,11 @@ impl UiExt for Editor {
         }
     }
 
+    fn set_status(&mut self, message: String) {
+        self.status_message = message;
+        self.status_time = Some(std::time::Instant::now());
+    }
+
     fn show_help(&mut self) -> io::Result<()> {
         let help_lines = [
             "  Notation:",
@@ -1401,33 +1492,33 @@ impl UiExt for Editor {
             "  - Additional .tmTheme themes can be added to ~/.xnano/themes",
             "",
             "  Movement:",
-            "    ^P, Up                Move up one line",
-            "    ^N, Down              Move down one line",
-            "    ^Y, M+P, PgUp, F7     Move up one page",
-            "    ^V, M+N, PgDn, F8     Move down one page",
-            "    ^B, Left              Move left/back one character",
-            "    ^F, Right             Move right/forward one character",
-            "    M+B, M+Left, ^Left    Move left/back one word",
-            "    M+F, M+Right, ^Right  Move right/forward one word",
-            "    ^A                    Move to start of line",
-            "    ^E                    Move to end of line",
-            "    M+M                   Mark current line",
-            "    M+,                   Move to previous mark",
-            "    M+.                   Move to next mark",
+            "    ^P, Up                 Move up one line",
+            "    ^N, Down               Move down one line",
+            "    ^Y, M+P, PgUp, F7      Move up one page",
+            "    ^Space, M+N, PgDn, F8  Move down one page",
+            "    ^B, Left               Move left/back one character",
+            "    ^F, Right              Move right/forward one character",
+            "    M+B, M+Left            Move left/back one word",
+            "    M+F, M+Right           Move right/forward one word",
+            "    ^A                     Move to start of line",
+            "    ^E                     Move to end of line",
+            "    M+M                    Mark current line",
+            "    M+,                    Move to previous mark",
+            "    M+.                    Move to next mark",
             "",
             "  Editing:",
-            "    M+U                   Undo last action",
-            "    M+R                   Redo last undone action",
-            "    ^C         Copy marked text or current line",
-            "    ^K, F9     Cut current line into clipboard",
-            "    ^U, F10    Paste contents of clipboard",
-            "    ^D, Del    Delete character under cursor",
-            "    Backspace  Delete character before cursor",
-            "    ^J, F4     Justify current paragraph",
-            "    ^I, Tab    Insert tab",
-            "    ^^, M+A    Mark beginning of selected text.",
-            "               This key also unselects text.",
-            "               Note: ^^ = Ctrl+^ = Ctrl+Shift+6",
+            "    M+U          Undo last action",
+            "    M+R          Redo last undone action",
+            "    ^C           Copy marked text or current line",
+            "    ^K, F9       Cut current line into clipboard",
+            "    ^V, ^U, F10  Paste contents of clipboard",
+            "    ^D, Del      Delete character under cursor",
+            "    Backspace    Delete character before cursor",
+            "    ^J, F4       Justify current paragraph",
+            "    ^I, Tab      Insert tab",
+            "    ^^, M+A      Mark beginning of selected text.",
+            "                 This key also unselects text.",
+            "                 Note: ^^ = Ctrl+^ = Ctrl+Shift+6",
             "",
             "  Search & Replace:",
             "    ^W, F6  Where is (Search)",
@@ -1440,15 +1531,15 @@ impl UiExt for Editor {
             "    ^X, F2  Exit xnano",
             "",
             "  Tools:",
-            "    M+C, F11   Current Position",
-            "    ^L       Go to line number",
-            "    ^T, F12  To Spell (Spell check)",
-            "             Does NOT work in Windows",
-            "    M+T      Cycle Syntax Theme",
-            "    M+L      Toggle Line Numbers",
-            "    M+S      Toggle Soft Wrap",
-            "    M+O      Toggle Menu Pages",
-            "    M+E      Toggle Mouse Capture",
+            "    M+C, F11  Current Position",
+            "    ^L        Go to line number",
+            "    ^T, F12   To Spell (Spell check)",
+            "              Does NOT work in Windows",
+            "    M+T       Cycle Syntax Theme",
+            "    M+L       Toggle Line Numbers",
+            "    M+S       Toggle Soft Wrap",
+            "    M+O       Toggle Menu Pages",
+            "    M+E       Toggle Mouse Capture",
             " ",
             "  Written by: Matt Bognar, https://github.com/mabognar",
             " ",
@@ -1538,10 +1629,10 @@ impl UiExt for Editor {
 
             let col_width = (cols as usize) / 6;
 
-            let menu1 = [("",""), ("^Y", " Prev Pg")];
+            let menu1 = [("",""), ("  ^Y", " Prev Pg")];
             Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
-            let menu2 = [("^X", " Exit Help"), ("^V", " Next Pg")];
+            let menu2 = [("^X", " Exit Help"), ("^Spc", " Next Pg")];
             Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
 
             stdout.flush()?;
@@ -1553,8 +1644,7 @@ impl UiExt for Editor {
                         continue;
                     }
                     match key.code {
-                        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-                        KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                        KeyCode::Char('h') | KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                         KeyCode::F(2) => break,
                         KeyCode::Esc => break,
                         KeyCode::Up => {
@@ -1583,7 +1673,7 @@ impl UiExt for Editor {
                             let max_offset = help_lines.len().saturating_sub(visible_rows);
                             scroll_offset = (scroll_offset + visible_rows).min(max_offset);
                         }
-                        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        KeyCode::Char(' ') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             let max_offset = help_lines.len().saturating_sub(visible_rows);
                             scroll_offset = (scroll_offset + visible_rows).min(max_offset);
                         }
@@ -1635,86 +1725,5 @@ impl UiExt for Editor {
         self.clear_status();
         self.draw_screen()?;
         Ok(())
-    }
-
-    fn set_status(&mut self, message: String) {
-        self.status_message = message;
-        self.status_time = Some(std::time::Instant::now());
-    }
-
-    fn clear_status(&mut self) {
-        self.status_message.clear();
-        self.status_time = None;
-    }
-
-    fn get_soft_wrap_metrics(line_chars: &[char], target_visual_x: Option<usize>, available_width: usize) -> (usize, usize, usize) {
-        let mut current_y = 0;
-        let mut current_x = 0;
-        let mut target_y = 0;
-        let mut target_x = 0;
-        let mut visual_x = 0;
-
-        for (i, &ch) in line_chars.iter().enumerate() {
-            let is_start_of_word = i > 0 && line_chars[i - 1].is_whitespace() && !ch.is_whitespace();
-            if is_start_of_word && current_x > 0 && current_x < available_width {
-                let mut word_width = 0;
-                let mut peek_idx = i;
-                while peek_idx < line_chars.len() && !line_chars[peek_idx].is_whitespace() {
-                    word_width += 1;
-                    peek_idx += 1;
-                }
-                if current_x + word_width > available_width {
-                    current_x = available_width; // Force wrap
-                }
-            }
-
-            // skip spaces that would appear at the start of a wrapped line
-            let is_wrap_space = (current_x == 0 || current_x >= available_width) && i > 0 && ch.is_whitespace();
-            let display_chars = if ch == '\t' { 4 - (visual_x % 4) } else { 1 };
-
-            if is_wrap_space {
-                // cursor tracking
-                for _ in 0..display_chars {
-                    if Some(visual_x) == target_visual_x {
-                        target_y = if current_x >= available_width { current_y + 1 } else { current_y };
-                        target_x = 0;
-                    }
-                    visual_x += 1;
-                }
-                continue;
-            }
-
-            for _ in 0..display_chars {
-                if Some(visual_x) == target_visual_x {
-                    if current_x >= available_width {
-                        target_y = current_y + 1;
-                        target_x = 0;
-                    } else {
-                        target_y = current_y;
-                        target_x = current_x;
-                    }
-                }
-
-                if current_x >= available_width {
-                    current_y += 1;
-                    current_x = 0;
-                }
-
-                current_x += 1;
-                visual_x += 1;
-            }
-        }
-
-        if Some(visual_x) == target_visual_x {
-            if current_x >= available_width {
-                target_y = current_y + 1;
-                target_x = 0;
-            } else {
-                target_y = current_y;
-                target_x = current_x;
-            }
-        }
-
-        (current_y + 1, target_y, target_x)
     }
 }

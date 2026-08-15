@@ -486,26 +486,22 @@ impl Editor {
     pub(crate) fn toggle_mark(&mut self) {
         if self.mark.is_some() {
             self.mark = None;
-            self.set_status(String::from("Unmark set"));
+            self.set_status(String::from("Unselected text"));
         } else {
             self.mark = Some(self.get_cursor_char_idx());
             self.set_status(String::from("Mark Set"));
         }
     }
 
-
     pub(crate) fn process_keypress(&mut self) -> io::Result<()> {
         let event = event::read()?;
-
         match event {
             Event::Key(key) => {
                 // ignore key release events on Windows
                 if key.kind != event::KeyEventKind::Press {
                     return Ok(());
                 }
-
                 self.highlight_match = None;
-
                 let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 let mut is_alt = key.modifiers.contains(KeyModifiers::ALT);
 
@@ -514,6 +510,12 @@ impl Editor {
                     is_alt = true;
                     self.escape_pending = false;
                 } else if key.code == KeyCode::Esc {
+                    if self.mark.is_some() {
+                        self.mark = None;
+                        self.set_status(String::from("Unselected text"));
+                        return Ok(());
+                    }
+
                     self.escape_pending = true;
                     return Ok(());
                 }
@@ -554,7 +556,7 @@ impl Editor {
                         self.adjust_marks_on_delete(self.cursor_y);
                     }
 
-                    KeyCode::Char('u') if is_ctrl => self.paste_line(),
+                    KeyCode::Char('u') | KeyCode::Char('v') if is_ctrl => self.paste_line(),
                     KeyCode::F(10) => self.paste_line(),
 
                     KeyCode::Char('j') if is_ctrl => self.justify(),
@@ -606,7 +608,8 @@ impl Editor {
                     KeyCode::F(7) | KeyCode::PageUp => self.page_up()?,
                     KeyCode::Char('p') if is_alt => self.page_up()?,
 
-                    KeyCode::Char('v') if is_ctrl => self.page_down()?,
+                    KeyCode::Char(' ') if is_ctrl => self.page_down()?,
+                    // KeyCode::Char('v') if is_ctrl => self.page_down()?,
                     KeyCode::F(8) | KeyCode::PageDown => self.page_down()?,
                     KeyCode::Char('n') if is_alt => self.page_down()?,
 
@@ -830,7 +833,7 @@ impl Editor {
                                                         self.previous_action_was_cut = true;
                                                         self.adjust_marks_on_delete(self.cursor_y);
                                                     }
-                                                    4 => { self.undo(); }                 // M+U
+                                                    4 => { self.toggle_mark(); }         // M+A
                                                     5 => { self.menu_state = MenuState::Menu2; }  // M+O
                                                     _ => {}
                                                 }
@@ -839,14 +842,36 @@ impl Editor {
                                                     0 => { self.exit_editor()?; } // ^X
                                                     1 => { self.where_is()?; }    // ^W
                                                     2 => { self.replace()?; }     // ^\
-                                                    3 => { self.paste_line(); }   // ^U
-                                                    4 => { self.redo(); }         // M+R
+                                                    3 => { self.copy_selection(); }       // ^L
+                                                    4 => { self.paste_line(); }   // ^U
                                                     5 => { self.show_help()?; }   // ^H
                                                     _ => {}
                                                 }
                                             }
                                         }
                                         MenuState::Menu2 => {
+                                            if is_top_row {
+                                                match col_idx {
+                                                    0 => { self.undo(); }                // M+U
+                                                    1 => { self.cur_pos(); }             // ^C
+                                                    2 => { self.spell_check()?; }        // ^T
+                                                    3 => { self.toggle_line_mark(); }    // M+M
+                                                    4 => { self.goto_prev_mark()?; }     // M+,
+                                                    5 => { self.menu_state = MenuState::Menu4; } // M+O
+                                                    _ => {}
+                                                }
+                                            } else {
+                                                match col_idx {
+                                                    0 => { self.redo(); }         // M+R
+                                                    1 => { self.go_to_line()?; }       // ^L
+                                                    2 => { self.delete_char(); }       // ^D
+                                                    4 => { self.goto_next_mark()?; }   // M+.
+                                                    5 => { self.show_help()?; }        // ^H
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                        MenuState::Menu3 => {
                                             if is_top_row {
                                                 match col_idx {
                                                     0 => { self.move_up(); }               // ^P
@@ -869,27 +894,6 @@ impl Editor {
                                                 }
                                             }
                                         }
-                                        MenuState::Menu3 => {
-                                            if is_top_row {
-                                                match col_idx {
-                                                    0 => { self.cur_pos(); }             // ^C
-                                                    1 => { self.toggle_mark(); }         // M+A
-                                                    2 => { self.spell_check()?; }        // ^T
-                                                    3 => { self.toggle_line_mark(); }    // M+M
-                                                    4 => { self.goto_prev_mark()?; }     // M+,
-                                                    5 => { self.menu_state = MenuState::Menu4; } // M+O
-                                                    _ => {}
-                                                }
-                                            } else {
-                                                match col_idx {
-                                                    0 => { self.go_to_line()?; }       // ^L
-                                                    1 => { self.delete_char(); }       // ^D
-                                                    4 => { self.goto_next_mark()?; }   // M+.
-                                                    5 => { self.show_help()?; }        // ^H
-                                                    _ => {}
-                                                }
-                                            }
-                                        }
                                         MenuState::Menu4 => {
                                             if is_top_row {
                                                 match col_idx {
@@ -899,6 +903,14 @@ impl Editor {
                                                         self.set_status(if self.soft_wrap { "Soft wrap enabled".into() } else { "Soft wrap disabled".into() });
                                                     }
                                                     1 => { self.cycle_theme(); }          // M+T
+                                                    4 => {                                    // M+V
+                                                        if self.update_version.is_some() {
+                                                            let _ = webbrowser::open("https://github.com/mabognar/xnano/releases/latest");
+                                                            self.set_status(String::from("Opened browser to download update."));
+                                                        } else {
+                                                            self.set_status(String::from("xnano is the latest version"));
+                                                        }
+                                                    }
                                                     5 => { self.menu_state = MenuState::Menu1; }  // M+O
                                                     _ => {}
                                                 }
@@ -909,14 +921,7 @@ impl Editor {
                                                         self.save_config();
                                                         self.set_status(if self.show_line_numbers { "Line numbers enabled".into() } else { "Line numbers disabled".into() });
                                                     }
-                                                    1 => {                                    // M+V
-                                                        if self.update_version.is_some() {
-                                                            let _ = webbrowser::open("https://github.com/mabognar/xnano/releases/latest");
-                                                            self.set_status(String::from("Opened browser to download update."));
-                                                        } else {
-                                                            self.set_status(String::from("xnano is the latest version"));
-                                                        }
-                                                    }
+                                                    1 => { self.toggle_mouse(); }         // M+E
                                                     5 => { self.show_help()?; }       // ^H
                                                     _ => {}
                                                 }
@@ -1072,8 +1077,8 @@ impl Editor {
                     self.highlight_match = Some((self.cursor_y, self.cursor_x, self.cursor_x + match_len));
 
                     // prompt the user to keep searching or stop
-                    let prompt_result = self.prompt_yn("Find next instance?");
-
+                    let prompt_str = format!("Find next instance \"{}\"? ", query);
+                    let prompt_result = self.prompt_yn(&prompt_str);
                     self.highlight_match = None;
                     matches_found += 1;
 
@@ -1141,7 +1146,8 @@ impl Editor {
                 }
             };
 
-            if let Some(replacement) = self.prompt("Replace with: ", false)? {
+            let replace_prompt = format!("Replace \"{}\" with: ", query);
+            if let Some(replacement) = self.prompt(&replace_prompt, false)? {
                 let mut current_idx = self.get_cursor_char_idx();
                 let mut changes_made = 0;
                 let mut replace_all = false;
@@ -1452,7 +1458,7 @@ impl Editor {
             let path = Path::new(&expanded_path);
 
             if path.exists() && Some(&new_name) != self.filename.as_ref() {
-                let warning = format!("File \"{}\" exists, OVERWRITE ?", new_name);
+                let warning = format!("File \"{}\" exists. Overwrite? ", new_name);
                 match self.prompt_yn(&warning)? {
                     Some(true) => {}
                     _ => {
@@ -1695,7 +1701,7 @@ impl Editor {
             self.set_status(String::from("Mouse capture enabled"));
         } else {
             let _ = execute!(stdout, DisableMouseCapture);
-            self.set_status(String::from("Mouse capture disabled (native OS copy/paste enabled)"));
+            self.set_status(String::from("Mouse capture disabled. Native OS copy/paste enabled."));
         }
 
         self.save_config();

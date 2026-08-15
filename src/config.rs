@@ -22,14 +22,13 @@ pub struct UiColors {
 
 pub trait ConfigExt {
     fn cycle_theme(&mut self);
-    fn get_theme_colors(theme: &Theme) -> UiColors;
     fn get_base_dir() -> Option<PathBuf>;
     fn get_config_path() -> Option<PathBuf>;
+    fn get_theme_colors(theme: &Theme) -> UiColors;
     fn get_themes_dir() -> Option<PathBuf>;
     fn initialize_themes() -> std::io::Result<()>;
     fn load_config() -> (String, bool, bool, bool);
     fn save_config(&self);
-    // fn update_cursor_color(&self);
 }
 
 impl ConfigExt for Editor {
@@ -47,6 +46,21 @@ impl ConfigExt for Editor {
             self.status_message = format!("Theme changed to: {}", self.current_theme);
             self.status_time = Some(std::time::Instant::now());
         }
+    }
+
+    fn get_base_dir() -> Option<PathBuf> {
+        let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
+        if home.is_empty() {
+            None
+        } else {
+            let path = Path::new(&home).join(".xnano");
+            let _ = fs::create_dir_all(&path);
+            Some(path)
+        }
+    }
+
+    fn get_config_path() -> Option<PathBuf> {
+        Self::get_base_dir().map(|p| p.join("xnanorc"))
     }
 
     fn get_theme_colors(theme: &Theme) -> UiColors {
@@ -118,27 +132,6 @@ impl ConfigExt for Editor {
             let _ = std::io::Write::flush(&mut std::io::stdout());
         }
 
-        // if let Color::Rgb { r, g, b } = menu_hot_key {
-        //     let grey_shift = 80;
-        //
-        //     let (cursor_r, cursor_g, cursor_b) = if is_dark {
-        //         // lighten the cursor in dark mode
-        //         (r.saturating_sub(grey_shift), g.saturating_sub(grey_shift), b.saturating_sub(grey_shift))
-        //     } else {
-        //         // darken the cursor in light mode
-        //         (r.saturating_add(grey_shift), g.saturating_add(grey_shift), b.saturating_add(grey_shift))
-        //     };
-        //
-        //     print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", cursor_r, cursor_g, cursor_b);
-        //
-        //     // if is_dark {
-        //     //     print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", 100, 100, 100);
-        //     // } else {
-        //     //     print!("\x1b]12;#{:02x}{:02x}{:02x}\x07", 180, 180, 180);
-        //     // }
-        //     let _ = std::io::Write::flush(&mut std::io::stdout());
-        // }
-
         UiColors { bg: editor_bg,
             fg: editor_fg,
             menu_bg,
@@ -148,21 +141,6 @@ impl ConfigExt for Editor {
             is_dark
         }
 
-    }
-
-    fn get_base_dir() -> Option<PathBuf> {
-        let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
-        if home.is_empty() {
-            None
-        } else {
-            let path = Path::new(&home).join(".xnano");
-            let _ = fs::create_dir_all(&path);
-            Some(path)
-        }
-    }
-
-    fn get_config_path() -> Option<PathBuf> {
-        Self::get_base_dir().map(|p| p.join("xnanorc"))
     }
 
     fn get_themes_dir() -> Option<PathBuf> {
@@ -189,7 +167,7 @@ impl ConfigExt for Editor {
         let mut theme = String::from("base16-ocean.dark");
         let mut line_numbers = false;
         let mut soft_wrap = false;
-        let mut mouse_enabled = false; // <-- Default to false for first install!
+        let mut mouse_enabled = false;
 
         if let Some(path) = Self::get_config_path() {
             if let Ok(content) = fs::read_to_string(path) {
@@ -200,7 +178,7 @@ impl ConfigExt for Editor {
                             "theme" => theme = parts[1].to_string(),
                             "line_numbers" => line_numbers = parts[1] == "true",
                             "soft_wrap" => soft_wrap = parts[1] == "true",
-                            "mouse_enabled" => mouse_enabled = parts[1] == "true", // <-- Read setting
+                            "mouse_enabled" => mouse_enabled = parts[1] == "true",
                             _ => {}
                         }
                     }
