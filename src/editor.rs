@@ -524,7 +524,6 @@ impl Editor {
 
                 match key.code {
                     KeyCode::Char('^') if is_ctrl => self.toggle_mark(),
-                    KeyCode::Char('6') if is_ctrl => self.toggle_mark(),
                     KeyCode::Char('a') if is_alt => self.toggle_mark(),
 
                     KeyCode::Char('h') if is_ctrl => self.show_help()?,
