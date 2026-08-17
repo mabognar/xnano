@@ -27,7 +27,7 @@ cargo install xnano
 ```
 
 ## Help
-### MacOS Users: 
+### MacOS Users
     - On MacOS, make sure you have 'Use Option as Meta' selected 
       in your terminal settings
 ### Configuration

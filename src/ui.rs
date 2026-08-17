@@ -1319,10 +1319,10 @@ impl UiExt for Editor {
                 let menu_text_fg = colors.fg;
                 let col_width = (cols as usize) / 6;
 
-                let menu1 = [("", ""), ("^Y", " Prev Pg")];
+                let menu1 = [("Enter", " Select"), ("  ^Y", " Prev Pg")];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
 
-                let menu2 = [("^C", " Cancel"), ("^V", " Next Pg"), ("Enter", " Select")];
+                let menu2 = [("   ^C", " Cancel"), ("^Spc", " Next Pg"), ("", "")];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
 
                 stdout.flush()?;
@@ -1364,7 +1364,7 @@ impl UiExt for Editor {
                                 let max_offset = entries.len().saturating_sub(1);
                                 selected = (selected + visible_rows).min(max_offset);
                             }
-                            KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            KeyCode::Char(' ') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 let max_offset = entries.len().saturating_sub(1);
                                 selected = (selected + visible_rows).min(max_offset);
                             }
