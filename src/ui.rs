@@ -26,7 +26,6 @@ pub trait UiExt {
     fn prompt_yn(&mut self, prompt_text: &str) -> io::Result<Option<bool>>;
     fn prompt_replace(&mut self, prompt_text: &str) -> io::Result<Option<char>>;
     fn run_file_browser(&mut self, is_save_context: bool) -> io::Result<Option<String>>;
-    // fn run_file_browser(&mut self) -> io::Result<Option<String>>;
     fn set_status(&mut self, message: String);
     fn show_help(&mut self) -> io::Result<()>;
 }
@@ -152,22 +151,6 @@ impl UiExt for Editor {
                 final_file_section = String::new();
             }
         }
-        // if full_len > max_allowable_len {
-        //     let allowed_file_len = max_allowable_len.saturating_sub(title.chars().count() + mod_star.chars().count());
-        //     if allowed_file_len > 3 {
-        //         // Calculate how many characters from the END of the path we can keep
-        //         let keep_len = allowed_file_len.saturating_sub(3);
-        //         let skip_len = file_section.chars().count().saturating_sub(keep_len);
-        //
-        //         // Skip the beginning characters and collect the tail
-        //         let tail: String = file_section.chars().skip(skip_len).collect();
-        //
-        //         // Prepend the dots
-        //         final_file_section = format!("...{}", tail);
-        //     } else {
-        //         final_file_section = String::new();
-        //     }
-        // }
 
         let printed_left_len = title.chars().count() + final_file_section.chars().count() + mod_star.chars().count();
         let pad2_len = (cols as usize).saturating_sub(printed_left_len + indicators_len);
@@ -688,33 +671,6 @@ impl UiExt for Editor {
         (current_y + 1, target_y, target_x)
     }
 
-    // fn inline_prompt(&self, prefix: &str, initial_input: &str) -> io::Result<Option<String>> {
-    //     let mut chars: Vec<char> = initial_input.chars().collect();
-    //     let mut cursor_idx = chars.len();
-    //
-    //     let mut stdout = stdout();
-    //     let (_, rows) = terminal::size()?;
-    //
-    //     let theme = &self.theme_set.themes[&self.current_theme];
-    //     let colors = Self::get_theme_colors(theme);
-    //
-    //     loop {
-    //         let input_str: String = chars.iter().collect();
-    //
-    //         queue!(stdout, cursor::MoveTo(0, rows - 3), SetBackgroundColor(colors.menu_bg))?;
-    //         queue!(
-    //             stdout,
-    //             SetForegroundColor(colors.accent),
-    //             Print(prefix),
-    //             SetForegroundColor(colors.fg),
-    //             Print(&input_str),
-    //             terminal::Clear(ClearType::UntilNewLine)
-    //         )?;
-    //
-    //         let cursor_x = prefix.len() + cursor_idx;
-    //         queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
-    //         stdout.flush()?;
-
     fn inline_prompt(&self, prefix: &str, initial_input: &str) -> io::Result<Option<String>> {
         let mut chars: Vec<char> = initial_input.chars().collect();
         let mut cursor_idx = chars.len();
@@ -726,14 +682,14 @@ impl UiExt for Editor {
         let mut view_start = 0;
 
         loop {
-            // Fetch terminal size dynamically in the loop in case the window resizes
+            // fetch terminal size dynamically in the loop in case the window resizes
             let (cols, rows) = terminal::size()?;
 
-            // Calculate exact space available for input
+            // calculate exact space available for input
             let prompt_len = prefix.chars().count();
             let max_input_width = (cols as usize).saturating_sub(prompt_len + 1);
 
-            // Adjust the sliding window so the cursor is always visible
+            // adjust the sliding window so the cursor is always visible
             if cursor_idx < view_start {
                 view_start = cursor_idx;
             } else if cursor_idx >= view_start + max_input_width {
@@ -756,7 +712,7 @@ impl UiExt for Editor {
                 display_cursor_x += cursor_idx;
             }
 
-            // Add right ellipsis if there is hidden text
+            // add right ellipsis if there is hidden text
             if chars.len() > view_start + max_input_width {
                 if display_input.chars().count() >= max_input_width {
                     display_input.pop();
@@ -780,9 +736,6 @@ impl UiExt for Editor {
             if let Event::Key(k) = event::read()? {
                 if k.kind != event::KeyEventKind::Press { continue; }
                 match k.code {
-                    // KeyCode::Enter => {
-                    //     return Ok(if chars.is_empty() { None } else { Some(input_str) });
-                    // }
                     KeyCode::Enter => {
                         let final_string: String = chars.iter().collect();
                         return Ok(if chars.is_empty() { None } else { Some(final_string) });
@@ -866,41 +819,10 @@ impl UiExt for Editor {
             }
         }
 
-        // let mut chars: Vec<char> = input.chars().collect();
-        // let mut cursor_idx = chars.len();
-        //
-        // loop {
-        //     input = chars.iter().collect();
-        //
-        //     self.status_message = clean_prompt.clone();
-        //     self.draw_screen()?;
-        //
-        //     let (_, rows) = terminal::size()?;
-        //     let mut stdout = stdout();
-        //
-        //     let mut cursor_x = clean_prompt.len();
-        //
-        //     queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
-        //
-        //     let theme = &self.theme_set.themes[&self.current_theme];
-        //     let colors = Self::get_theme_colors(theme);
-        //
-        //     queue!(
-        //         stdout,
-        //         SetBackgroundColor(colors.menu_bg),
-        //         SetForegroundColor(colors.fg),
-        //         Print(&input)
-        //     )?;
-        //
-        //     cursor_x += cursor_idx;
-        //     queue!(stdout, cursor::MoveTo(cursor_x as u16, rows - 3))?;
-        //
-        //     stdout.flush()?;
-
         let mut chars: Vec<char> = input.chars().collect();
         let mut cursor_idx = chars.len();
 
-        // --- NEW: Tracks our horizontal scrolling window ---
+        // horizontal scrolling window
         let mut view_start = 0;
 
         loop {
@@ -911,12 +833,12 @@ impl UiExt for Editor {
             let (cols, rows) = terminal::size()?;
             let mut stdout = stdout();
 
-            // Calculate exact space available for input
+            // calculate exact space available for input
             let prompt_len = clean_prompt.chars().count();
             // Leave 1 character margin to prevent terminal auto-wrapping
             let max_input_width = (cols as usize).saturating_sub(prompt_len + 1);
 
-            // Adjust the sliding window so the cursor is always visible
+            // adjust the sliding window so the cursor is always visible
             if cursor_idx < view_start {
                 view_start = cursor_idx;
             } else if cursor_idx >= view_start + max_input_width {
@@ -939,7 +861,7 @@ impl UiExt for Editor {
                 display_cursor_x += cursor_idx;
             }
 
-            // Add right ellipsis if there is hidden text
+            // add right ellipsis if there is hidden text
             if chars.len() > view_start + max_input_width {
                 if display_input.chars().count() >= max_input_width {
                     display_input.pop(); // Make room for '…'
@@ -971,7 +893,7 @@ impl UiExt for Editor {
                     match key.code {
                         KeyCode::Enter => {
                             if is_save_prompt && !input.is_empty() {
-                                // --- NEW: Expand the tilde BEFORE validating the directory ---
+                                // expand the tilde before validating directory
                                 let expanded_input = Self::expand_tilde(&input);
                                 let mut target = std::path::PathBuf::from(&expanded_input);
 
@@ -994,7 +916,6 @@ impl UiExt for Editor {
                                     }
                                 }
 
-                                // Return the properly expanded and resolved path
                                 input = target.to_string_lossy().into_owned();
                             }
 
@@ -1020,14 +941,6 @@ impl UiExt for Editor {
                             }
                             self.menu_state = MenuState::PromptWithBrowser;
                         }
-                        // KeyCode::Char('t') if allow_browser && key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        //     if let Some(selected_path) = self.run_file_browser()? {
-                        //         self.clear_status();
-                        //         self.menu_state = original_menu;
-                        //         return Ok(Some(selected_path));
-                        //     }
-                        //     self.menu_state = MenuState::PromptWithBrowser;
-                        // }
                         KeyCode::Left => cursor_idx = cursor_idx.saturating_sub(1),
                         KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => cursor_idx = cursor_idx.saturating_sub(1),
                         KeyCode::Right => {

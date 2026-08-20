@@ -73,7 +73,7 @@ pub struct Editor {
     pub(crate) escape_pending: bool,
     pub(crate) update_rx: Option<Receiver<String>>,
     pub(crate) update_version: Option<String>,
-    pub line_marks: BTreeSet<usize>,
+    pub(crate) line_marks: BTreeSet<usize>,
     pub(crate) mouse_enabled: bool,
     pub(crate) inactive_buffers: VecDeque<BufferState>,
     pub(crate) active_buffer_index: usize,
@@ -83,9 +83,12 @@ impl BufferState {
     pub fn new(filename: Option<String>) -> Self {
         let buffer = if let Some(ref fname) = filename {
             let expanded = Editor::expand_tilde(fname);
-            if let Ok(file) = File::open(&expanded) { ropey::Rope::from_reader(io::BufReader::new(file)).unwrap_or_default() } else { ropey::Rope::new() }
+            if let Ok(file) = File::open(&expanded) { ropey::Rope::from_reader(io::BufReader::new(file)).unwrap_or_default() }
+            else { ropey::Rope::new() }
         } else { ropey::Rope::new() };
-        Self { buffer, cursor_x: 0, cursor_y: 0, desired_cursor_x: 0, undo_stack: Vec::new(), redo_stack: Vec::new(), mark: None, row_offset: 0, col_offset: 0, filename, is_modified: false, highlight_cache: HashMap::new(), line_marks: BTreeSet::new() }
+        Self { buffer, cursor_x: 0, cursor_y: 0, desired_cursor_x: 0, undo_stack: Vec::new(),
+            redo_stack: Vec::new(), mark: None, row_offset: 0, col_offset: 0, filename,
+            is_modified: false, highlight_cache: HashMap::new(), line_marks: BTreeSet::new() }
     }
 }
 
@@ -812,7 +815,7 @@ impl Editor {
                                     None
                                 };
 
-                                // check if the cursor is perfectly sandwiched between an empty pair
+                                // check if the cursor is sandwiched between an empty pair
                                 let is_empty_pair = match (char_behind, char_at_cursor) {
                                     ('(', Some(')')) | ('[', Some(']')) | ('{', Some('}')) | ('"', Some('"')) | ('\'', Some('\'')) => true,
                                     _ => false,
@@ -825,7 +828,6 @@ impl Editor {
                                     // single-character delete
                                     self.buffer.remove((idx - 1)..idx);
                                 }
-                                // --------------------------
 
                                 // adjust the cursor exactly one space backward regardless of whether we deleted 1 or 2 chars
                                 self.cursor_y = self.buffer.char_to_line(idx - 1);
@@ -1154,7 +1156,7 @@ impl Editor {
                             break;
                         }
                     } else {
-                        // Cancelled: stop at the current cursor location
+                        // cancel: stop at the current cursor location
                         self.set_status(String::from("Search cancelled"));
                         break;
                     }
@@ -1880,10 +1882,9 @@ impl Editor {
 
     pub(crate) fn is_file_open(&self, expanded_path: &str) -> bool {
         let target = Path::new(expanded_path);
-        // canonicalize resolves full absolute paths and symlinks
         let target_canon = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
 
-        // Check the active buffer
+        // check the active buffer
         if let Some(ref current) = self.filename {
             let current_canon = fs::canonicalize(current).unwrap_or_else(|_| Path::new(current).to_path_buf());
             if current_canon == target_canon {
@@ -1891,7 +1892,7 @@ impl Editor {
             }
         }
 
-        // Check background buffers
+        // check background buffers
         for state in &self.inactive_buffers {
             if let Some(ref fname) = state.filename {
                 let fname_canon = fs::canonicalize(fname).unwrap_or_else(|_| Path::new(fname).to_path_buf());
