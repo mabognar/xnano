@@ -10,10 +10,11 @@ use std::io;
 
 fn main() -> io::Result<()> {
     let _ = Editor::initialize_themes();
-
     let args: Vec<String> = env::args().collect();
-    let filename = args.get(1).cloned();
+    // snatch all arguments after the executable name
+    let filenames: Vec<String> = args.into_iter().skip(1).collect();
 
-    let mut editor = Editor::new(filename);
+    // pass the vector
+    let mut editor = Editor::new(filenames);
     editor.run()
 }

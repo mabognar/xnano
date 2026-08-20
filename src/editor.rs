@@ -2,7 +2,7 @@ use crate::config::ConfigExt;
 use crate::spell::SpellExt;
 use crate::ui::UiExt;
 
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashSet, HashMap, VecDeque};
 use std::time::{Duration, Instant};
 use std::path::Path;
 use std::fs::{self, File};
@@ -30,6 +30,15 @@ pub(crate) enum MenuState {
     CancelOnly,
     PromptWithBrowser,
     SpellCheck,
+}
+
+pub(crate) struct BufferState {
+    pub buffer: Rope, pub cursor_x: usize, pub cursor_y: usize,
+    pub desired_cursor_x: usize, pub undo_stack: Vec<(Rope, usize, usize)>,
+    pub redo_stack: Vec<(Rope, usize, usize)>, pub mark: Option<usize>,
+    pub row_offset: usize, pub col_offset: usize, pub filename: Option<String>,
+    pub is_modified: bool, pub highlight_cache: HashMap<usize, Vec<(Style, String)>>,
+    pub line_marks: BTreeSet<usize>,
 }
 
 pub struct Editor {
@@ -66,11 +75,41 @@ pub struct Editor {
     pub(crate) update_version: Option<String>,
     pub line_marks: BTreeSet<usize>,
     pub(crate) mouse_enabled: bool,
+    pub(crate) inactive_buffers: VecDeque<BufferState>,
+    pub(crate) active_buffer_index: usize,
 }
 
-impl Editor {
+impl BufferState {
     pub fn new(filename: Option<String>) -> Self {
         let buffer = if let Some(ref fname) = filename {
+            let expanded = Editor::expand_tilde(fname);
+            if let Ok(file) = File::open(&expanded) { ropey::Rope::from_reader(io::BufReader::new(file)).unwrap_or_default() } else { ropey::Rope::new() }
+        } else { ropey::Rope::new() };
+        Self { buffer, cursor_x: 0, cursor_y: 0, desired_cursor_x: 0, undo_stack: Vec::new(), redo_stack: Vec::new(), mark: None, row_offset: 0, col_offset: 0, filename, is_modified: false, highlight_cache: HashMap::new(), line_marks: BTreeSet::new() }
+    }
+}
+
+
+impl Editor {
+
+    pub fn new(filenames: Vec<String>) -> Self {
+        // deduplicate incoming files using canonical paths
+        let mut unique_files = Vec::new();
+        let mut seen_paths = HashSet::new();
+
+        for fname in filenames {
+            let expanded = Self::expand_tilde(&fname);
+            let target = Path::new(&expanded);
+            let canon = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+
+            if seen_paths.insert(canon) {
+                unique_files.push(fname);
+            }
+        }
+
+        // load the first file into the active buffer
+        let first_file = unique_files.get(0).cloned();
+        let buffer = if let Some(ref fname) = first_file {
             let expanded = Self::expand_tilde(fname);
             if let Ok(file) = File::open(&expanded) {
                 Rope::from_reader(io::BufReader::new(file)).unwrap_or_default()
@@ -80,6 +119,12 @@ impl Editor {
         } else {
             Rope::new()
         };
+
+        // load remaining files into the background queue
+        let mut inactive_buffers = VecDeque::new();
+        for fname in unique_files.into_iter().skip(1) {
+            inactive_buffers.push_back(BufferState::new(Some(fname)));
+        }
 
         let mut theme_set = ThemeSet::load_defaults();
         let mut themes_found = 0;
@@ -111,6 +156,7 @@ impl Editor {
         };
 
         let (mut starting_theme, line_numbers, soft_wrap, mouse_enabled) = Self::load_config();
+
         if !theme_set.themes.contains_key(&starting_theme) {
             starting_theme = String::from("base16-ocean.dark");
         }
@@ -118,7 +164,6 @@ impl Editor {
         let (update_tx, update_rx) = mpsc::channel();
         thread::spawn(move || {
             let current_version = env!("CARGO_PKG_VERSION");
-            // GitHub API requires a user-agent header
             if let Ok(resp) = ureq::get("https://api.github.com/repos/mabognar/xnano/releases/latest")
                 .set("User-Agent", "xnano-update-checker")
                 .timeout(Duration::from_secs(3))
@@ -145,7 +190,7 @@ impl Editor {
             mark: None,
             row_offset: 0,
             col_offset: 0,
-            filename,
+            filename: first_file, // This handles the scoping correctly
             should_quit: false,
             status_message: initial_status,
             status_time: Some(Instant::now()),
@@ -164,11 +209,13 @@ impl Editor {
             show_line_numbers: line_numbers,
             soft_wrap,
             previous_action_was_cut: false,
-            escape_pending: false, // Initialize tracker
+            escape_pending: false,
             update_rx: Some(update_rx),
             update_version: None,
             line_marks: BTreeSet::new(),
             mouse_enabled,
+            inactive_buffers,
+            active_buffer_index: 0,
         }
     }
 
@@ -466,19 +513,28 @@ impl Editor {
     pub(crate) fn exit_editor(&mut self) -> io::Result<()> {
         if self.is_modified {
             match self.prompt_yn("Save modified buffer (ANSWERING \"No\" WILL DESTROY CHANGES) ?")? {
-                Some(true) => {
-                    self.save_file()?;
-                    if !self.is_modified {
-                        self.should_quit = true;
-                    }
-                }
-                Some(false) => {
-                    self.should_quit = true;
-                }
-                None => {}
+                Some(true) => { self.save_file()?; if self.is_modified { return Ok(()); } }
+                Some(false) => {} None => { return Ok(()); }
             }
-        } else {
+        }
+
+        if self.inactive_buffers.is_empty() {
             self.should_quit = true;
+        } else {
+            let next = self.inactive_buffers.pop_front().unwrap();
+            self.unpack_buffer(next);
+
+            let total = self.inactive_buffers.len() + 1;
+            if self.active_buffer_index >= total {
+                self.active_buffer_index = 0;
+            }
+
+            let fname = self.filename.as_deref()
+                .and_then(|p| Path::new(p).file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| String::from("New Buffer"));
+
+            self.set_status(format!("Closed buffer - switching to {}", fname));
         }
         Ok(())
     }
@@ -790,6 +846,9 @@ impl Editor {
                     }
                     KeyCode::Char('u') if is_alt => self.undo(),
                     KeyCode::Char('r') if is_alt => self.redo(),
+                    KeyCode::Char('<') if is_alt => self.cycle_prev_buffer(),
+                    KeyCode::Char('>') if is_alt => self.cycle_next_buffer(),
+                    KeyCode::Char('i') if is_alt => self.open_new_buffer()?,
                     _ => { self.clear_status(); }
                 }
                 self.previous_action_was_cut = current_action_is_cut;
@@ -832,18 +891,18 @@ impl Editor {
                                                         self.previous_action_was_cut = true;
                                                         self.adjust_marks_on_delete(self.cursor_y);
                                                     }
-                                                    4 => { self.toggle_mark(); }         // M+A
+                                                    4 => { self.toggle_mark(); }          // M+A
                                                     5 => { self.menu_state = MenuState::Menu2; }  // M+O
                                                     _ => {}
                                                 }
                                             } else {
                                                 match col_idx {
-                                                    0 => { self.exit_editor()?; } // ^X
-                                                    1 => { self.where_is()?; }    // ^W
-                                                    2 => { self.replace()?; }     // ^\
-                                                    3 => { self.copy_selection(); }       // ^L
-                                                    4 => { self.paste_line(); }   // ^U
-                                                    5 => { self.show_help()?; }   // ^H
+                                                    0 => { self.exit_editor()?; }    // ^X
+                                                    1 => { self.where_is()?; }       // ^W
+                                                    2 => { self.replace()?; }        // ^\
+                                                    3 => { self.copy_selection(); }  // ^L
+                                                    4 => { self.paste_line(); }      // ^U
+                                                    5 => { self.show_help()?; }      // ^H
                                                     _ => {}
                                                 }
                                             }
@@ -861,7 +920,7 @@ impl Editor {
                                                 }
                                             } else {
                                                 match col_idx {
-                                                    0 => { self.redo(); }         // M+R
+                                                    0 => { self.redo(); }              // M+R
                                                     1 => { self.go_to_line()?; }       // ^L
                                                     2 => { self.delete_char(); }       // ^D
                                                     4 => { self.goto_next_mark()?; }   // M+.
@@ -878,7 +937,7 @@ impl Editor {
                                                     2 => { self.move_left(); }             // ^B
                                                     3 => { self.move_word_left(); }        // M+B
                                                     4 => { self.move_to_start_of_line(); } // ^A
-                                                    5 => { self.menu_state = MenuState::Menu3; }  // M+O
+                                                    5 => { self.menu_state = MenuState::Menu3; }   // M+O
                                                     _ => {}
                                                 }
                                             } else {
@@ -902,7 +961,9 @@ impl Editor {
                                                         self.set_status(if self.soft_wrap { "Soft wrap enabled".into() } else { "Soft wrap disabled".into() });
                                                     }
                                                     1 => { self.cycle_theme(); }          // M+T
-                                                    4 => {                                    // M+V
+                                                    2 => { self.open_new_buffer()?; }     // M+I
+                                                    3 => { self.cycle_next_buffer() }     // M+>
+                                                    4 => {                                        // M+V
                                                         if self.update_version.is_some() {
                                                             let _ = webbrowser::open("https://github.com/mabognar/xnano/releases/latest");
                                                             self.set_status(String::from("Opened browser to download update."));
@@ -915,13 +976,14 @@ impl Editor {
                                                 }
                                             } else {
                                                 match col_idx {
-                                                    0 => {                                    // M+L
+                                                    0 => {                                        // M+L
                                                         self.show_line_numbers = !self.show_line_numbers;
                                                         self.save_config();
                                                         self.set_status(if self.show_line_numbers { "Line numbers enabled".into() } else { "Line numbers disabled".into() });
                                                     }
                                                     1 => { self.toggle_mouse(); }         // M+E
-                                                    5 => { self.show_help()?; }       // ^H
+                                                    3 => { self.cycle_prev_buffer() }     // M+<
+                                                    5 => { self.show_help()?; }           // ^H
                                                     _ => {}
                                                 }
                                             }
@@ -983,10 +1045,10 @@ impl Editor {
                                             char_x += 1;
 
                                             if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
-                                                // A standard click clears any existing selection
+                                                // a standard click clears any existing selection
                                                 self.mark = None;
                                             } else if mouse.kind == event::MouseEventKind::Drag(event::MouseButton::Left) {
-                                                // Dragging starts a selection from the cursor's current position
+                                                // dragging starts a selection from the cursor's current position
                                                 // (where the click started) if we don't already have one active
                                                 if self.mark.is_none() {
                                                     self.mark = Some(self.get_cursor_char_idx());
@@ -1015,9 +1077,9 @@ impl Editor {
 
     pub(crate) fn where_is(&mut self) -> io::Result<()> {
         let prompt_text = if let Some(ref last) = self.last_search {
-            format!("Search (RegEx) [{}]: ", last)
+            format!("Search [{}]: ", last)
         } else {
-            String::from("Search (RegEx): ")
+            String::from("Search: ")
         };
 
         if let Some(mut query) = self.prompt(&prompt_text, false)? {
@@ -1083,11 +1145,11 @@ impl Editor {
 
                     if let Some(action) = prompt_result? {
                         if action {
-                            // Yes: advance past this match and loop again
+                            // yes: advance past this match and loop again
                             current_idx = end_idx;
                             self.clear_status();
                         } else {
-                            // No: stop at the current cursor location
+                            // no: stop at the current cursor location
                             self.clear_status();
                             break;
                         }
@@ -1120,9 +1182,9 @@ impl Editor {
     pub(crate) fn replace(&mut self) -> io::Result<()> {
         self.snapshot();
         let prompt_text = if let Some(ref last) = self.last_search {
-            format!("Search to replace (RegEx) [{}]: ", last)
+            format!("Search to replace [{}]: ", last)
         } else {
-            String::from("Search to replace (RegEx): ")
+            String::from("Search to replace: ")
         };
 
         if let Some(mut query) = self.prompt(&prompt_text, false)? {
@@ -1384,7 +1446,7 @@ impl Editor {
     pub(crate) fn paste_line(&mut self) {
         self.snapshot();
 
-        // 1. Try to sync FROM the OS clipboard first
+        // try to sync from the OS clipboard first
         if let Ok(mut ctx) = arboard::Clipboard::new() {
             if let Ok(os_text) = ctx.get_text() {
                 self.clipboard = os_text;
@@ -1456,6 +1518,29 @@ impl Editor {
             let expanded_path = Self::expand_tilde(&new_name);
             let path = Path::new(&expanded_path);
 
+            // --- NEW: Prevent saving over a file that is open in another buffer ---
+            let target_canon = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let mut is_in_background = false;
+
+            for state in &self.inactive_buffers {
+                if let Some(ref fname) = state.filename {
+                    let fname_canon = fs::canonicalize(fname).unwrap_or_else(|_| Path::new(fname).to_path_buf());
+                    if fname_canon == target_canon {
+                        is_in_background = true;
+                        break;
+                    }
+                }
+            }
+
+            if is_in_background {
+                let short_name = path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| new_name.clone());
+
+                self.set_status(format!("Save cancelled: '{}' is already open in another buffer", short_name));
+                return Ok(());
+            }
+
             if path.exists() && Some(&new_name) != self.filename.as_ref() {
                 let warning = format!("File \"{}\" exists. Overwrite? ", new_name);
                 match self.prompt_yn(&warning)? {
@@ -1473,16 +1558,13 @@ impl Editor {
                         self.set_status(format!("Error writing file: {}", e));
                     } else {
                         self.filename = Some(new_name);
-
                         self.highlight_cache.clear();
-
                         self.set_status(format!("Wrote {} lines", self.buffer.len_lines()));
                         self.is_modified = false;
                     }
                 }
                 Err(e) => self.set_status(format!("Error creating file: {}", e)),
             }
-
         }
         Ok(())
     }
@@ -1528,7 +1610,7 @@ impl Editor {
             idx -= 1;
         }
 
-        // if we didn't hit the absolute beginning of the file, step forward one
+        // if we do not hit beginning of file, step forward one
         // to land on the first letter of the word.
         if idx > 0 || !(self.buffer.char(idx).is_alphanumeric() || self.buffer.char(idx) == '_') {
             idx += 1;
@@ -1704,6 +1786,122 @@ impl Editor {
         }
 
         self.save_config();
+    }
+
+    pub(crate) fn pack_buffer(&mut self) -> BufferState {
+        BufferState {
+            buffer: std::mem::replace(&mut self.buffer, Rope::new()),
+            cursor_x: self.cursor_x, cursor_y: self.cursor_y, desired_cursor_x: self.desired_cursor_x,
+            undo_stack: std::mem::take(&mut self.undo_stack), redo_stack: std::mem::take(&mut self.redo_stack),
+            mark: self.mark.take(), row_offset: self.row_offset, col_offset: self.col_offset,
+            filename: self.filename.take(), is_modified: self.is_modified,
+            highlight_cache: std::mem::take(&mut self.highlight_cache), line_marks: std::mem::take(&mut self.line_marks),
+        }
+    }
+
+    pub(crate) fn unpack_buffer(&mut self, mut state: BufferState) {
+        self.buffer = std::mem::replace(&mut state.buffer, Rope::new());
+        self.cursor_x = state.cursor_x; self.cursor_y = state.cursor_y; self.desired_cursor_x = state.desired_cursor_x;
+        self.undo_stack = std::mem::take(&mut state.undo_stack); self.redo_stack = std::mem::take(&mut state.redo_stack);
+        self.mark = state.mark.take(); self.row_offset = state.row_offset; self.col_offset = state.col_offset;
+        self.filename = state.filename.take(); self.is_modified = state.is_modified;
+        self.highlight_cache = std::mem::take(&mut state.highlight_cache); self.line_marks = std::mem::take(&mut state.line_marks);
+    }
+
+    pub(crate) fn cycle_next_buffer(&mut self) {
+        if self.inactive_buffers.is_empty() { self.set_status(String::from("No other buffers")); return; }
+
+        let current = self.pack_buffer();
+        self.inactive_buffers.push_back(current);
+        let next = self.inactive_buffers.pop_front().unwrap();
+        self.unpack_buffer(next);
+
+        let total = self.inactive_buffers.len() + 1;
+        self.active_buffer_index = (self.active_buffer_index + 1) % total;
+
+        // --- ONLY GRAB THE FILE NAME ---
+        let fname = self.filename.as_deref()
+            .and_then(|p| Path::new(p).file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| String::from("New Buffer"));
+
+        self.set_status(format!("Switched to: {}", fname));
+    }
+
+    pub(crate) fn cycle_prev_buffer(&mut self) {
+        if self.inactive_buffers.is_empty() { self.set_status(String::from("No other buffers")); return; }
+
+        let current = self.pack_buffer();
+        self.inactive_buffers.push_front(current);
+        let prev = self.inactive_buffers.pop_back().unwrap();
+        self.unpack_buffer(prev);
+
+        let total = self.inactive_buffers.len() + 1;
+        self.active_buffer_index = (self.active_buffer_index + total - 1) % total;
+
+        let fname = self.filename.as_deref()
+            .and_then(|p| Path::new(p).file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| String::from("New Buffer"));
+
+        self.set_status(format!("Switched to: {}", fname));
+    }
+
+    pub(crate) fn open_new_buffer(&mut self) -> io::Result<()> {
+        if let Some(filepath) = self.prompt("File to open (leave blank for new): ", true)? {
+            if filepath.trim().is_empty() {
+                let current = self.pack_buffer();
+                self.inactive_buffers.push_back(current);
+                self.unpack_buffer(BufferState::new(None));
+                self.active_buffer_index = self.inactive_buffers.len();
+                self.set_status(String::from("Opened new empty buffer"));
+            } else {
+                let expanded = Self::expand_tilde(&filepath);
+
+                let short_name = Path::new(&expanded)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| filepath.clone());
+
+                if self.is_file_open(&expanded) {
+                    self.set_status(format!("File is already open: {}", short_name));
+                    return Ok(());
+                }
+
+                let current = self.pack_buffer();
+                self.inactive_buffers.push_back(current);
+                self.unpack_buffer(BufferState::new(Some(expanded.clone())));
+                self.active_buffer_index = self.inactive_buffers.len();
+                self.set_status(format!("Opened buffer: {}", short_name));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn is_file_open(&self, expanded_path: &str) -> bool {
+        let target = Path::new(expanded_path);
+        // canonicalize resolves full absolute paths and symlinks
+        let target_canon = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+
+        // Check the active buffer
+        if let Some(ref current) = self.filename {
+            let current_canon = fs::canonicalize(current).unwrap_or_else(|_| Path::new(current).to_path_buf());
+            if current_canon == target_canon {
+                return true;
+            }
+        }
+
+        // Check background buffers
+        for state in &self.inactive_buffers {
+            if let Some(ref fname) = state.filename {
+                let fname_canon = fs::canonicalize(fname).unwrap_or_else(|_| Path::new(fname).to_path_buf());
+                if fname_canon == target_canon {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 }
 

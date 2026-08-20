@@ -32,16 +32,22 @@ pub trait ConfigExt {
 }
 
 impl ConfigExt for Editor {
+
     fn cycle_theme(&mut self) {
         let mut themes: Vec<String> = self.theme_set.themes.keys().cloned().collect();
         themes.sort();
-
         if let Some(current_idx) = themes.iter().position(|t| t == &self.current_theme) {
             let next_idx = (current_idx + 1) % themes.len();
             self.current_theme = themes[next_idx].clone();
-
             self.save_config();
+
+            // Wipe the cache for the active buffer
             self.clear_cache();
+
+            // Wipe the cache for all inactive buffers so they redraw with the new theme
+            for state in &mut self.inactive_buffers {
+                state.highlight_cache.clear();
+            }
 
             self.status_message = format!("Theme changed to: {}", self.current_theme);
             self.status_time = Some(std::time::Instant::now());
