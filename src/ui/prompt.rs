@@ -1,5 +1,8 @@
 use crate::editor::{Editor, FileExt, MenuState};
 use crate::config::ConfigExt;
+use crate::ui::{BrowserExt};
+use crate::ui::{RenderExt, HelpExt};
+
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
@@ -9,8 +12,7 @@ use crossterm::{
 };
 use std::env;
 use std::io::{self, stdout, Write};
-use crate::ui::{BrowserExt};
-use crate::ui::{RenderExt, HelpExt};
+
 
 pub trait PromptExt {
     fn inline_prompt(&self, prefix: &str, initial_input: &str) -> io::Result<Option<String>>;
@@ -18,6 +20,7 @@ pub trait PromptExt {
     fn prompt_yn(&mut self, prompt_text: &str) -> io::Result<Option<bool>>;
     fn prompt_replace(&mut self, prompt_text: &str) -> io::Result<Option<char>>;
 }
+
 
 impl PromptExt for Editor {
 
@@ -479,7 +482,7 @@ impl PromptExt for Editor {
         Ok(result)
     }
 
-    
+
     fn prompt_replace(&mut self, prompt_text: &str) -> io::Result<Option<char>> {
         let original_menu = self.menu_state;
         self.menu_state = MenuState::ReplaceAction;

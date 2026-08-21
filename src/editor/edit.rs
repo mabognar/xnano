@@ -3,12 +3,14 @@ use crate::editor::MovementExt;
 use crate::ui::HelpExt;
 
 pub trait EditExt {
+    fn clear_cache(&mut self);
     fn copy_selection(&mut self);
     fn cut_line(&mut self);
     fn delete_char(&mut self);
     fn delete_selection(&mut self) -> bool;
     fn insert_tab(&mut self);
     fn justify(&mut self);
+    fn mark_modified(&mut self);
     fn paste_line(&mut self);
     fn redo(&mut self);
     fn snapshot(&mut self);
@@ -16,6 +18,11 @@ pub trait EditExt {
 }
 
 impl EditExt for Editor {
+
+    fn clear_cache(&mut self) {
+        self.highlight_cache.clear();
+    }
+
 
     fn copy_selection(&mut self) {
         if self.buffer.len_chars() == 0 { return; }
@@ -50,7 +57,6 @@ impl EditExt for Editor {
             let _ = ctx.set_text(self.clipboard.clone());
         }
     }
-
 
     fn cut_line(&mut self) {
         self.snapshot();
@@ -228,6 +234,12 @@ impl EditExt for Editor {
     }
 
 
+    fn mark_modified(&mut self) {
+        self.is_modified = true;
+        self.clear_cache();
+    }
+
+
     fn paste_line(&mut self) {
         self.snapshot();
 
@@ -280,7 +292,7 @@ impl EditExt for Editor {
         self.redo_stack.clear();
     }
 
-    
+
     fn undo(&mut self) {
         if let Some((old_buffer, old_x, old_y)) = self.undo_stack.pop() {
             // save our current reality to the redo stack

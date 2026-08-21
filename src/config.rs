@@ -1,3 +1,4 @@
+use crate::editor::edit::EditExt;
 use crate::editor::Editor;
 
 use crossterm::style::Color;
@@ -8,6 +9,7 @@ use std::path::{Path, PathBuf};
 use include_dir::{include_dir, Dir};
 
 static BUNDLED_THEMES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/themes");
+
 
 #[derive(Clone, Copy)]
 pub struct UiColors {
@@ -20,6 +22,7 @@ pub struct UiColors {
     pub indicator: Color,
 }
 
+
 pub trait ConfigExt {
     fn cycle_theme(&mut self);
     fn get_base_dir() -> Option<PathBuf>;
@@ -30,6 +33,7 @@ pub trait ConfigExt {
     fn load_config() -> (String, bool, bool, bool);
     fn save_config(&self);
 }
+
 
 impl ConfigExt for Editor {
 
@@ -200,7 +204,7 @@ impl ConfigExt for Editor {
         (theme, line_numbers, soft_wrap, mouse_enabled)
     }
 
-    
+
     fn save_config(&self) {
         if let Some(path) = Self::get_config_path() {
             let content = format!(

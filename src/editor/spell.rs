@@ -14,6 +14,7 @@ pub trait SpellExt {
     fn get_distance(a: &str, b: &str) -> usize;
 }
 
+
 impl SpellExt for Editor {
 
     fn load_dictionary() -> HashSet<String> {
@@ -203,7 +204,7 @@ impl SpellExt for Editor {
         scored.into_iter().take(6).map(|(w, _)| w.clone()).collect()
     }
 
-    
+
     fn get_distance(a: &str, b: &str) -> usize {
         let a: Vec<char> = a.chars().collect();
         let b: Vec<char> = b.chars().collect();

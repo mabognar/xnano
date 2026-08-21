@@ -1,21 +1,21 @@
 mod file;
 mod movement;
-mod edit;
+pub(crate) mod edit;
 mod buffer;
 mod search;
 mod marks;
 mod spell;
 
 use crate::config::ConfigExt;
-use spell::SpellExt;
 use crate::ui::{HelpExt, RenderExt};
 
 pub use file::FileExt;
 pub use movement::MovementExt;
-pub use edit::EditExt;
-pub use buffer::BufferManagerExt;
-pub use search::SearchExt;
-pub use marks::MarkExt;
+use edit::EditExt;
+use buffer::BufferManagerExt;
+use search::SearchExt;
+use marks::MarkExt;
+use spell::SpellExt;
 
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -35,6 +35,7 @@ use std::collections::BTreeSet;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
+
 #[derive(PartialEq, Clone, Copy)]
 pub(crate) enum MenuState {
     Menu1,
@@ -48,6 +49,7 @@ pub(crate) enum MenuState {
     SpellCheck,
 }
 
+
 pub(crate) struct BufferState {
     pub buffer: Rope, pub cursor_x: usize, pub cursor_y: usize,
     pub desired_cursor_x: usize, pub undo_stack: Vec<(Rope, usize, usize)>,
@@ -56,6 +58,7 @@ pub(crate) struct BufferState {
     pub is_modified: bool, pub highlight_cache: HashMap<usize, Vec<(Style, String)>>,
     pub line_marks: BTreeSet<usize>,
 }
+
 
 pub struct Editor {
     pub(crate) buffer: Rope,
@@ -238,14 +241,17 @@ impl Editor {
         }
     }
 
-    pub(crate) fn clear_cache(&mut self) {
-        self.highlight_cache.clear();
-    }
 
-    pub(crate) fn mark_modified(&mut self) {
-        self.is_modified = true;
-        self.clear_cache();
-    }
+    // pub(crate) fn clear_cache(&mut self) {
+    //     self.highlight_cache.clear();
+    // }
+    //
+    //
+    // pub(crate) fn mark_modified(&mut self) {
+    //     self.is_modified = true;
+    //     self.clear_cache();
+    // }
+
 
     pub fn run(&mut self) -> io::Result<()> {
         terminal::enable_raw_mode()?;
@@ -322,6 +328,7 @@ impl Editor {
 
         Ok(())
     }
+
 
     pub(crate) fn process_keypress(&mut self) -> io::Result<()> {
         let event = event::read()?;
@@ -847,6 +854,7 @@ impl Editor {
         self.scroll()?;
         Ok(())
     }
+
 
     pub(crate) fn toggle_mouse(&mut self) {
         self.mouse_enabled = !self.mouse_enabled;

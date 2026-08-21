@@ -1,9 +1,11 @@
 use crate::editor::{EditExt, Editor, MovementExt};
 use crate::ui::{PromptExt, HelpExt};
+
 use std::env;
 use std::fs::{self, File};
 use std::io::{self, BufWriter};
 use std::path::Path;
+
 
 pub trait FileExt {
     fn expand_tilde(path: &str) -> String;
@@ -11,6 +13,7 @@ pub trait FileExt {
     fn read_file(&mut self) -> io::Result<()>;
     fn save_file(&mut self) -> io::Result<()>;
 }
+
 
 impl FileExt for Editor {
 
@@ -72,7 +75,7 @@ impl FileExt for Editor {
         Ok(())
     }
 
-    
+
     fn save_file(&mut self) -> io::Result<()> {
         let default_name = self.filename.clone().unwrap_or_default();
         let prompt_text = if default_name.is_empty() {

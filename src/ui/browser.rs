@@ -1,5 +1,7 @@
 use crate::editor::Editor;
 use crate::config::ConfigExt;
+use crate::ui::{RenderExt, PromptExt, HelpExt};
+
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
@@ -11,11 +13,12 @@ use std::env;
 use std::fs;
 use std::io::{self, stdout, Write};
 use std::path::PathBuf;
-use crate::ui::{RenderExt, PromptExt, HelpExt};
+
 
 pub trait BrowserExt {
     fn run_file_browser(&mut self, is_save_context: bool) -> io::Result<Option<String>>;
 }
+
 
 impl BrowserExt for Editor {
 

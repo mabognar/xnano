@@ -1,5 +1,6 @@
 use crate::editor::{Editor, MenuState, MovementExt};
 use crate::config::ConfigExt;
+
 use crossterm::{
     cursor,
     queue,
@@ -12,12 +13,14 @@ use std::io::{self, stdout, Write};
 use std::env;
 use std::fs;
 
+
 pub trait RenderExt {
     fn draw_menu_line(writer: &mut io::Stdout, row: u16, cols: u16, col_width: usize,
                       items: &[(&str, &str)], ui_bg: Color, key_fg: Color, text_fg: Color) -> io::Result<()>;
     fn draw_screen(&mut self) -> io::Result<()>;
     fn get_soft_wrap_metrics(line_chars: &[char], target_visual_x: Option<usize>, available_width: usize) -> (usize, usize, usize);
 }
+
 
 impl RenderExt for Editor {
 
@@ -586,7 +589,7 @@ impl RenderExt for Editor {
         Ok(())
     }
 
-    
+
     fn get_soft_wrap_metrics(line_chars: &[char], target_visual_x: Option<usize>, available_width: usize) -> (usize, usize, usize) {
         let mut current_y = 0;
         let mut current_x = 0;

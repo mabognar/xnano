@@ -1,7 +1,9 @@
 use crate::editor::Editor;
 use crate::ui::{HelpExt, PromptExt};
+
 use crossterm::terminal;
 use std::io;
+
 
 pub trait MovementExt {
     fn cur_pos(&mut self);
@@ -22,6 +24,7 @@ pub trait MovementExt {
     fn page_up(&mut self) -> io::Result<()>;
     fn scroll(&mut self) -> io::Result<()>;
 }
+
 
 impl MovementExt for Editor {
 
