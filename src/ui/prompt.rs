@@ -127,6 +127,7 @@ impl PromptExt for Editor {
         }
     }
 
+
     fn prompt(&mut self, prompt_text: &str, allow_browser: bool) -> io::Result<Option<String>> {
         let original_menu = self.menu_state;
 
@@ -393,6 +394,7 @@ impl PromptExt for Editor {
         }
     }
 
+
     fn prompt_yn(&mut self, prompt_text: &str) -> io::Result<Option<bool>> {
         let original_menu = self.menu_state; // Capture state to prevent jump-back bugs
         self.menu_state = MenuState::YesNoCancel;
@@ -477,6 +479,7 @@ impl PromptExt for Editor {
         Ok(result)
     }
 
+    
     fn prompt_replace(&mut self, prompt_text: &str) -> io::Result<Option<char>> {
         let original_menu = self.menu_state;
         self.menu_state = MenuState::ReplaceAction;

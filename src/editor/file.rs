@@ -50,6 +50,7 @@ impl FileExt for Editor {
         false
     }
 
+
     fn read_file(&mut self) -> io::Result<()> {
         if let Some(filepath) = self.prompt("File to insert: ", true)? {
             if filepath.is_empty() {
@@ -71,6 +72,7 @@ impl FileExt for Editor {
         Ok(())
     }
 
+    
     fn save_file(&mut self) -> io::Result<()> {
         let default_name = self.filename.clone().unwrap_or_default();
         let prompt_text = if default_name.is_empty() {

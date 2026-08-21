@@ -54,6 +54,7 @@ impl ConfigExt for Editor {
         }
     }
 
+
     fn get_base_dir() -> Option<PathBuf> {
         let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
         if home.is_empty() {
@@ -65,9 +66,11 @@ impl ConfigExt for Editor {
         }
     }
 
+
     fn get_config_path() -> Option<PathBuf> {
         Self::get_base_dir().map(|p| p.join("xnanorc"))
     }
+
 
     fn get_theme_colors(theme: &Theme) -> UiColors {
         let raw_bg = theme.settings.background.unwrap_or(syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 });
@@ -149,6 +152,7 @@ impl ConfigExt for Editor {
 
     }
 
+
     fn get_themes_dir() -> Option<PathBuf> {
         Self::get_base_dir().map(|p| {
             let themes_dir = p.join("themes");
@@ -156,6 +160,7 @@ impl ConfigExt for Editor {
             themes_dir
         })
     }
+
 
     fn initialize_themes() -> std::io::Result<()> {
         if let Some(themes_dir) = Self::get_themes_dir() {
@@ -168,6 +173,7 @@ impl ConfigExt for Editor {
         }
         Ok(())
     }
+
 
     fn load_config() -> (String, bool, bool, bool) {
         let mut theme = String::from("base16-ocean.dark");
@@ -194,6 +200,7 @@ impl ConfigExt for Editor {
         (theme, line_numbers, soft_wrap, mouse_enabled)
     }
 
+    
     fn save_config(&self) {
         if let Some(path) = Self::get_config_path() {
             let content = format!(

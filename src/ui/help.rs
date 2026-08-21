@@ -17,8 +17,7 @@ pub trait HelpExt {
 }
 
 impl HelpExt for Editor {
-
-
+    
     fn clear_status(&mut self) {
         self.status_message.clear();
         self.status_time = None;

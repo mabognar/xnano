@@ -55,6 +55,7 @@ impl MarkExt for Editor {
         Ok(())
     }
 
+
     fn goto_prev_mark(&mut self) -> std::io::Result<()> {
         if self.line_marks.is_empty() {
             self.set_status(String::from("No marks set"));
@@ -76,6 +77,7 @@ impl MarkExt for Editor {
         Ok(())
     }
 
+
     fn toggle_line_mark(&mut self) {
         if self.line_marks.contains(&self.cursor_y) {
             self.line_marks.remove(&self.cursor_y);
@@ -86,6 +88,7 @@ impl MarkExt for Editor {
         }
     }
 
+    
     fn toggle_mark(&mut self) {
         if self.mark.is_some() {
             self.mark = None;

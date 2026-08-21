@@ -4,10 +4,11 @@ mod edit;
 mod buffer;
 mod search;
 mod marks;
+mod spell;
 
 use crate::config::ConfigExt;
-use crate::spell::SpellExt;
-use crate::ui::{RenderExt, HelpExt};
+use spell::SpellExt;
+use crate::ui::{HelpExt, RenderExt};
 
 pub use file::FileExt;
 pub use movement::MovementExt;
@@ -17,7 +18,7 @@ pub use search::SearchExt;
 pub use marks::MarkExt;
 
 
-use std::collections::{HashSet, HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 use std::path::Path;
 use std::fs::{self, File};
@@ -27,8 +28,8 @@ use ropey::Rope;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use crossterm::{
-    execute, terminal,
-    event::{self, Event, KeyCode, KeyModifiers, EnableMouseCapture, DisableMouseCapture, MouseEventKind, MouseButton}
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind}, execute,
+    terminal
 };
 use std::collections::BTreeSet;
 use std::sync::mpsc::{self, Receiver};
@@ -846,7 +847,7 @@ impl Editor {
         self.scroll()?;
         Ok(())
     }
-    
+
     pub(crate) fn toggle_mouse(&mut self) {
         self.mouse_enabled = !self.mouse_enabled;
         let mut stdout = io::stdout();

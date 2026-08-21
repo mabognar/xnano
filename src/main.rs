@@ -1,6 +1,5 @@
 mod config;
 mod editor;
-mod spell;
 mod ui;
 
 use crate::config::ConfigExt;

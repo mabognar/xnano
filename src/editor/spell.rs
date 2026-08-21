@@ -1,5 +1,4 @@
 use crate::editor::{EditExt, Editor, MenuState, MovementExt};
-// use crate::ui::UiExt;
 use crate::config::ConfigExt;
 use crate::ui::{RenderExt, PromptExt, HelpExt};
 
@@ -16,6 +15,7 @@ pub trait SpellExt {
 }
 
 impl SpellExt for Editor {
+
     fn load_dictionary() -> HashSet<String> {
         let mut dict = HashSet::new();
 
@@ -44,6 +44,7 @@ impl SpellExt for Editor {
 
         dict
     }
+
 
     fn find_next_misspelled(&self, start_idx: usize) -> Option<(String, usize, usize)> {
         let dict = self.dictionary.as_ref().unwrap();
@@ -75,6 +76,7 @@ impl SpellExt for Editor {
         }
         None
     }
+
 
     fn spell_check(&mut self) -> io::Result<()> {
         let original_menu = self.menu_state;
@@ -189,6 +191,7 @@ impl SpellExt for Editor {
         Ok(())
     }
 
+
     fn get_suggestions(word: &str, dict: &HashSet<String>) -> Vec<String> {
         let mut scored: Vec<(&String, usize)> = dict.iter()
             .filter(|w| (w.len() as isize - word.len() as isize).abs() <= 2)
@@ -200,6 +203,7 @@ impl SpellExt for Editor {
         scored.into_iter().take(6).map(|(w, _)| w.clone()).collect()
     }
 
+    
     fn get_distance(a: &str, b: &str) -> usize {
         let a: Vec<char> = a.chars().collect();
         let b: Vec<char> = b.chars().collect();

@@ -24,6 +24,7 @@ pub trait MovementExt {
 }
 
 impl MovementExt for Editor {
+
     fn cur_pos(&mut self) {
         let line = self.cursor_y + 1;
         let total_lines = self.buffer.len_lines();
@@ -32,9 +33,11 @@ impl MovementExt for Editor {
         self.set_status(format!("line {}/{}, col {}, char {}", line, total_lines, col, total_chars));
     }
 
+
     fn get_cursor_char_idx(&self) -> usize {
         self.buffer.line_to_char(self.cursor_y) + self.cursor_x
     }
+
 
     fn get_visual_cursor_x(&self) -> usize {
         if self.cursor_y >= self.buffer.len_lines() { return 0; }
@@ -62,6 +65,7 @@ impl MovementExt for Editor {
         w
     }
 
+
     fn go_to_line(&mut self) -> io::Result<()> {
         if let Some(input) = self.prompt("Enter line number: ", false)? {
             if let Ok(line) = input.trim().parse::<usize>() {
@@ -76,6 +80,7 @@ impl MovementExt for Editor {
         Ok(())
     }
 
+
     fn line_len(&self, y: usize) -> usize {
         if y >= self.buffer.len_lines() {
             return 0;
@@ -88,12 +93,14 @@ impl MovementExt for Editor {
         len
     }
 
+
     fn move_down(&mut self) {
         if self.cursor_y < self.buffer.len_lines().saturating_sub(1) {
             self.cursor_y += 1;
             self.cursor_x = self.desired_cursor_x.min(self.line_len(self.cursor_y));
         }
     }
+
 
     fn move_left(&mut self) {
         let idx = self.get_cursor_char_idx();
@@ -105,6 +112,7 @@ impl MovementExt for Editor {
         }
     }
 
+
     fn move_right(&mut self) {
         let idx = self.get_cursor_char_idx();
         if idx < self.buffer.len_chars() {
@@ -115,15 +123,18 @@ impl MovementExt for Editor {
         }
     }
 
+
     fn move_to_end_of_line(&mut self) {
         self.cursor_x = self.line_len(self.cursor_y);
         self.desired_cursor_x = self.cursor_x;
     }
 
+
     fn move_to_start_of_line(&mut self) {
         self.cursor_x = 0;
         self.desired_cursor_x = 0;
     }
+
 
     fn move_up(&mut self) {
         if self.cursor_y > 0 {
@@ -131,6 +142,8 @@ impl MovementExt for Editor {
             self.cursor_x = self.desired_cursor_x.min(self.line_len(self.cursor_y));
         }
     }
+
+
     fn move_word_left(&mut self) {
         let mut idx = self.get_cursor_char_idx();
         if idx == 0 { return; }
@@ -159,6 +172,7 @@ impl MovementExt for Editor {
         self.desired_cursor_x = self.cursor_x;
     }
 
+
     fn move_word_right(&mut self) {
         let mut idx = self.get_cursor_char_idx();
         let len = self.buffer.len_chars();
@@ -184,6 +198,7 @@ impl MovementExt for Editor {
         self.desired_cursor_x = self.cursor_x;
     }
 
+
     fn page_down(&mut self) -> io::Result<()> {
         let (_, rows) = terminal::size()?;
         let visible_rows = rows.saturating_sub(4) as usize;
@@ -193,6 +208,7 @@ impl MovementExt for Editor {
         Ok(())
     }
 
+
     fn page_up(&mut self) -> io::Result<()> {
         let (_, rows) = terminal::size()?;
         let visible_rows = rows.saturating_sub(4) as usize;
@@ -200,6 +216,7 @@ impl MovementExt for Editor {
         self.cursor_x = self.desired_cursor_x.min(self.line_len(self.cursor_y));
         Ok(())
     }
+
 
     fn scroll(&mut self) -> io::Result<()> {
         let (cols, rows) = terminal::size()?;

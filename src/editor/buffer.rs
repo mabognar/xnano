@@ -36,6 +36,7 @@ impl BufferManagerExt for Editor {
         self.set_status(format!("Switched to: {}", fname));
     }
 
+
     fn cycle_prev_buffer(&mut self) {
         if self.inactive_buffers.is_empty() { self.set_status(String::from("No other buffers")); return; }
 
@@ -54,6 +55,8 @@ impl BufferManagerExt for Editor {
 
         self.set_status(format!("Switched to: {}", fname));
     }
+
+
     fn exit_editor(&mut self) -> io::Result<()> {
         if self.is_modified {
             match self.prompt_yn("Save modified buffer (ANSWERING \"No\" WILL DESTROY CHANGES) ?")? {
@@ -82,6 +85,7 @@ impl BufferManagerExt for Editor {
         }
         Ok(())
     }
+
 
     fn open_new_buffer(&mut self) -> io::Result<()> {
         if let Some(filepath) = self.prompt("File to open (leave blank for new): ", true)? {
@@ -114,6 +118,7 @@ impl BufferManagerExt for Editor {
         Ok(())
     }
 
+
     fn pack_buffer(&mut self) -> BufferState {
         BufferState {
             buffer: std::mem::replace(&mut self.buffer, Rope::new()),
@@ -125,6 +130,7 @@ impl BufferManagerExt for Editor {
         }
     }
 
+    
     fn unpack_buffer(&mut self, mut state: BufferState) {
         self.buffer = std::mem::replace(&mut state.buffer, Rope::new());
         self.cursor_x = state.cursor_x; self.cursor_y = state.cursor_y; self.desired_cursor_x = state.desired_cursor_x;

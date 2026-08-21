@@ -63,6 +63,7 @@ impl RenderExt for Editor {
         Ok(())
     }
 
+
     fn draw_screen(&mut self) -> io::Result<()> {
         let mut stdout = stdout();
 
@@ -585,6 +586,7 @@ impl RenderExt for Editor {
         Ok(())
     }
 
+    
     fn get_soft_wrap_metrics(line_chars: &[char], target_visual_x: Option<usize>, available_width: usize) -> (usize, usize, usize) {
         let mut current_y = 0;
         let mut current_x = 0;

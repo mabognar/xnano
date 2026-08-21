@@ -126,6 +126,7 @@ impl SearchExt for Editor {
         Ok(())
     }
 
+    
     fn where_is(&mut self) -> io::Result<()> {
         let prompt_text = if let Some(ref last) = self.last_search {
             format!("Search [{}]: ", last)
