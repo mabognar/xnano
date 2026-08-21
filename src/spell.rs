@@ -1,6 +1,7 @@
-use crate::editor::{Editor, MenuState};
-use crate::ui::UiExt;
+use crate::editor::{EditExt, Editor, MenuState, MovementExt};
+// use crate::ui::UiExt;
 use crate::config::ConfigExt;
+use crate::ui::{RenderExt, PromptExt, HelpExt};
 
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
