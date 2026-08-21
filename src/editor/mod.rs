@@ -1,22 +1,21 @@
-mod file;
-mod movement;
-pub(crate) mod edit;
-mod buffer;
-mod search;
-mod marks;
-mod spell;
+pub mod buffer;
+pub mod edit;
+pub mod file;
+pub mod marks;
+pub mod movement;
+pub mod search;
+pub mod spell;
 
 use crate::config::ConfigExt;
+use crate::editor::edit::EditExt;
 use crate::ui::{HelpExt, RenderExt};
 
 pub use file::FileExt;
 pub use movement::MovementExt;
-use edit::EditExt;
 use buffer::BufferManagerExt;
 use search::SearchExt;
 use marks::MarkExt;
 use spell::SpellExt;
-
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
@@ -28,7 +27,8 @@ use ropey::Rope;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind}, execute,
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers,
+            MouseButton, MouseEventKind}, execute,
     terminal
 };
 use std::collections::BTreeSet;
@@ -50,7 +50,7 @@ pub(crate) enum MenuState {
 }
 
 
-pub(crate) struct BufferState {
+pub struct BufferState {
     pub buffer: Rope, pub cursor_x: usize, pub cursor_y: usize,
     pub desired_cursor_x: usize, pub undo_stack: Vec<(Rope, usize, usize)>,
     pub redo_stack: Vec<(Rope, usize, usize)>, pub mark: Option<usize>,
@@ -61,44 +61,46 @@ pub(crate) struct BufferState {
 
 
 pub struct Editor {
-    pub(crate) buffer: Rope,
-    pub(crate) cursor_x: usize,
-    pub(crate) cursor_y: usize,
-    pub(crate) desired_cursor_x: usize,
-    pub(crate) undo_stack: Vec<(Rope, usize, usize)>,
-    pub(crate) redo_stack: Vec<(Rope, usize, usize)>,
-    pub(crate) mark: Option<usize>,
-    pub(crate) row_offset: usize,
-    pub(crate) col_offset: usize,
-    pub(crate) filename: Option<String>,
-    pub(crate) should_quit: bool,
-    pub(crate) status_message: String,
-    pub(crate) clipboard: String,
-    pub(crate) dictionary: Option<HashSet<String>>,
-    pub(crate) ignored_words: HashSet<String>,
-    pub(crate) current_suggestions: Vec<String>,
-    pub(crate) syntax_set: SyntaxSet,
-    pub(crate) theme_set: ThemeSet,
-    pub(crate) is_modified: bool,
-    pub(crate) last_search: Option<String>,
-    pub(crate) menu_state: MenuState,
-    pub(crate) status_time: Option<Instant>,
-    pub(crate) highlight_match: Option<(usize, usize, usize)>,
-    pub(crate) highlight_cache: HashMap<usize, Vec<(Style, String)>>,
-    pub(crate) current_theme: String,
-    pub(crate) show_line_numbers: bool,
-    pub(crate) soft_wrap: bool,
-    pub(crate) previous_action_was_cut: bool,
-    pub(crate) escape_pending: bool,
-    pub(crate) update_rx: Option<Receiver<String>>,
-    pub(crate) update_version: Option<String>,
-    pub(crate) line_marks: BTreeSet<usize>,
-    pub(crate) mouse_enabled: bool,
-    pub(crate) inactive_buffers: VecDeque<BufferState>,
-    pub(crate) active_buffer_index: usize,
+    pub buffer: Rope,
+    pub cursor_x: usize,
+    pub cursor_y: usize,
+    pub desired_cursor_x: usize,
+    pub undo_stack: Vec<(Rope, usize, usize)>,
+    pub redo_stack: Vec<(Rope, usize, usize)>,
+    pub mark: Option<usize>,
+    pub row_offset: usize,
+    pub col_offset: usize,
+    pub filename: Option<String>,
+    pub should_quit: bool,
+    pub status_message: String,
+    pub clipboard: String,
+    pub dictionary: Option<HashSet<String>>,
+    pub ignored_words: HashSet<String>,
+    pub current_suggestions: Vec<String>,
+    pub syntax_set: SyntaxSet,
+    pub theme_set: ThemeSet,
+    pub is_modified: bool,
+    pub last_search: Option<String>,
+    pub menu_state: MenuState,
+    pub status_time: Option<Instant>,
+    pub highlight_match: Option<(usize, usize, usize)>,
+    pub highlight_cache: HashMap<usize, Vec<(Style, String)>>,
+    pub current_theme: String,
+    pub show_line_numbers: bool,
+    pub soft_wrap: bool,
+    pub previous_action_was_cut: bool,
+    pub escape_pending: bool,
+    pub update_rx: Option<Receiver<String>>,
+    pub update_version: Option<String>,
+    pub line_marks: BTreeSet<usize>,
+    pub mouse_enabled: bool,
+    pub inactive_buffers: VecDeque<BufferState>,
+    pub active_buffer_index: usize,
 }
 
+
 impl BufferState {
+
     pub fn new(filename: Option<String>) -> Self {
         let buffer = if let Some(ref fname) = filename {
             let expanded = Editor::expand_tilde(fname);
@@ -242,22 +244,10 @@ impl Editor {
     }
 
 
-    // pub(crate) fn clear_cache(&mut self) {
-    //     self.highlight_cache.clear();
-    // }
-    //
-    //
-    // pub(crate) fn mark_modified(&mut self) {
-    //     self.is_modified = true;
-    //     self.clear_cache();
-    // }
-
-
     pub fn run(&mut self) -> io::Result<()> {
         terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
 
-        // Split the execute macro into two parts
         execute!(stdout, terminal::EnterAlternateScreen)?;
         if self.mouse_enabled {
             execute!(stdout, EnableMouseCapture)?;

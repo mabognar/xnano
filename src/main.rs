@@ -10,7 +10,7 @@ use std::io;
 fn main() -> io::Result<()> {
     let _ = Editor::initialize_themes();
     let args: Vec<String> = env::args().collect();
-    // snatch all arguments after the executable name
+    // grab all arguments after xnano on command line
     let filenames: Vec<String> = args.into_iter().skip(1).collect();
 
     // pass the vector

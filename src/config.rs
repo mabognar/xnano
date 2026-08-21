@@ -1,5 +1,5 @@
-use crate::editor::edit::EditExt;
 use crate::editor::Editor;
+use crate::editor::edit::EditExt;
 
 use crossterm::style::Color;
 use syntect::highlighting::Theme;
@@ -45,10 +45,10 @@ impl ConfigExt for Editor {
             self.current_theme = themes[next_idx].clone();
             self.save_config();
 
-            // Wipe the cache for the active buffer
+            // wipe cache for active buffer
             self.clear_cache();
 
-            // Wipe the cache for all inactive buffers so they redraw with the new theme
+            // wipe cache for all inactive buffers so they redraw with new theme
             for state in &mut self.inactive_buffers {
                 state.highlight_cache.clear();
             }

@@ -1,6 +1,6 @@
-pub mod prompt;
 pub mod browser;
 pub mod help;
+pub mod prompt;
 pub mod render;
 
 pub use prompt::PromptExt;
