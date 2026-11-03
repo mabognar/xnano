@@ -116,16 +116,39 @@ impl BufferState {
 
 impl Editor {
 
+    // pub fn new(filenames: Vec<String>) -> Self {
+    //     // deduplicate incoming files using canonical paths
+    //     let mut unique_files = Vec::new();
+    //     let mut seen_paths = HashSet::new();
+    //
+    //     for fname in filenames {
+    //         let expanded = Self::expand_tilde(&fname);
+    //         let target = Path::new(&expanded);
+    //         let canon = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+    //
+    //         if seen_paths.insert(canon) {
+    //             unique_files.push(fname);
+    //         }
+    //     }
+
     pub fn new(filenames: Vec<String>) -> Self {
         // deduplicate incoming files using canonical paths
         let mut unique_files = Vec::new();
         let mut seen_paths = HashSet::new();
+        let mut start_line = 0; // ADDED: Track the starting line
 
         for fname in filenames {
+            // ADDED: Intercept line number arguments passed by LESS or vi
+            if fname.starts_with('+') {
+                if let Ok(line) = fname[1..].parse::<usize>() {
+                    start_line = line.saturating_sub(1); // 0-indexed
+                    continue; // Skip treating this as a file
+                }
+            }
+
             let expanded = Self::expand_tilde(&fname);
             let target = Path::new(&expanded);
             let canon = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
-
             if seen_paths.insert(canon) {
                 unique_files.push(fname);
             }
@@ -144,11 +167,23 @@ impl Editor {
             Rope::new()
         };
 
+        // // load remaining files into the background queue
+        // let mut inactive_buffers = VecDeque::new();
+        // for fname in unique_files.into_iter().skip(1) {
+        //     inactive_buffers.push_back(BufferState::new(Some(fname)));
+        // }
+
         // load remaining files into the background queue
         let mut inactive_buffers = VecDeque::new();
         for fname in unique_files.into_iter().skip(1) {
             inactive_buffers.push_back(BufferState::new(Some(fname)));
         }
+
+        // ADDED: Clamp the cursor to the actual file length
+        let max_y = buffer.len_lines().saturating_sub(1);
+        let initial_cursor_y = if buffer.len_lines() > 0 { start_line.min(max_y) } else { 0 };
+        // Basic centering logic for the initial view offset
+        let initial_row_offset = initial_cursor_y.saturating_sub(15);
 
         let mut theme_set = ThemeSet::load_defaults();
         let mut themes_found = 0;
@@ -207,12 +242,12 @@ impl Editor {
         Self {
             buffer,
             cursor_x: 0,
-            cursor_y: 0,
+            cursor_y: initial_cursor_y,    // MODIFIED
             desired_cursor_x: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             mark: None,
-            row_offset: 0,
+            row_offset: initial_row_offset, // MODIFIED
             col_offset: 0,
             filename: first_file, // This handles the scoping correctly
             should_quit: false,
@@ -243,81 +278,151 @@ impl Editor {
         }
     }
 
-
     pub fn run(&mut self) -> io::Result<()> {
         terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
-
         execute!(stdout, terminal::EnterAlternateScreen)?;
         if self.mouse_enabled {
             execute!(stdout, EnableMouseCapture)?;
         }
 
+        let mut needs_redraw = true;
+
         loop {
-            // check for update in background
+            // Check for updates and clean up receiver once thread drops
             if let Some(rx) = &self.update_rx {
-                if let Ok(version) = rx.try_recv() {
-                    self.update_version = Some(version.clone());
-                    self.set_status(format!("Press Meta+V (Alt+V) to update xnano to version {}", version));
-                    self.update_rx = None; // Stop checking
+                match rx.try_recv() {
+                    Ok(version) => {
+                        self.update_version = Some(version.clone());
+                        self.set_status(format!("Press Meta+V (Alt+V) to update xnano to version {}", version));
+                        self.update_rx = None;
+                        needs_redraw = true;
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.update_rx = None; // Stop checking when the thread finishes
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
                 }
             }
 
-            // expire old status messages
+            // Expire status messages after 3 seconds
             if let Some(time) = self.status_time {
-                if time.elapsed() >= Duration::from_secs(10) {
+                if time.elapsed() >= Duration::from_secs(3) {
                     self.clear_status();
+                    needs_redraw = true;
                 }
             }
 
-            self.draw_screen()?;
+            if needs_redraw {
+                self.draw_screen()?;
+                needs_redraw = false;
+            }
+
             if self.should_quit {
                 break;
             }
 
-            // calculate how long to sleep before repolling
+            // Calculate sleep duration until next status expiration or thread check
             let mut timeout = if let Some(time) = self.status_time {
-                let elapsed = time.elapsed();
-                if elapsed >= Duration::from_secs(3) {
-                    Duration::from_millis(1)
-                } else {
-                    Duration::from_secs(3) - elapsed
-                }
+                Duration::from_secs(3).saturating_sub(time.elapsed())
             } else {
                 Duration::from_secs(3600)
             };
 
-            // wake every 250ms to check the background thread
             if self.update_rx.is_some() {
                 timeout = timeout.min(Duration::from_millis(250));
             }
 
-            // wait for event
             if event::poll(timeout)? {
                 self.process_keypress()?;
-            } else {
-                if let Some(time) = self.status_time {
-                    if time.elapsed() >= Duration::from_secs(3) {
-                        self.clear_status();
-                    }
-                }
+                needs_redraw = true;
             }
         }
 
-        // flush any pending terminal events before exiting
         while event::poll(Duration::from_millis(0))? {
             let _ = event::read()?;
         }
-
         execute!(stdout, DisableMouseCapture, terminal::LeaveAlternateScreen)?;
         terminal::disable_raw_mode()?;
-
-        // reset cursor color on exit
         print!("\x1b]112\x07");
         let _ = io::Write::flush(&mut io::stdout());
-
         Ok(())
     }
+
+    // pub fn run(&mut self) -> io::Result<()> {
+    //     terminal::enable_raw_mode()?;
+    //     let mut stdout = io::stdout();
+    //
+    //     execute!(stdout, terminal::EnterAlternateScreen)?;
+    //     if self.mouse_enabled {
+    //         execute!(stdout, EnableMouseCapture)?;
+    //     }
+    //
+    //     loop {
+    //         // check for update in background
+    //         if let Some(rx) = &self.update_rx {
+    //             if let Ok(version) = rx.try_recv() {
+    //                 self.update_version = Some(version.clone());
+    //                 self.set_status(format!("Press Meta+V (Alt+V) to update xnano to version {}", version));
+    //                 self.update_rx = None; // Stop checking
+    //             }
+    //         }
+    //
+    //         // expire old status messages
+    //         if let Some(time) = self.status_time {
+    //             if time.elapsed() >= Duration::from_secs(10) {
+    //                 self.clear_status();
+    //             }
+    //         }
+    //
+    //         self.draw_screen()?;
+    //         if self.should_quit {
+    //             break;
+    //         }
+    //
+    //         // calculate how long to sleep before repolling
+    //         let mut timeout = if let Some(time) = self.status_time {
+    //             let elapsed = time.elapsed();
+    //             if elapsed >= Duration::from_secs(3) {
+    //                 Duration::from_millis(1)
+    //             } else {
+    //                 Duration::from_secs(3) - elapsed
+    //             }
+    //         } else {
+    //             Duration::from_secs(3600)
+    //         };
+    //
+    //         // wake every 250ms to check the background thread
+    //         if self.update_rx.is_some() {
+    //             timeout = timeout.min(Duration::from_millis(250));
+    //         }
+    //
+    //         // wait for event
+    //         if event::poll(timeout)? {
+    //             self.process_keypress()?;
+    //         } else {
+    //             if let Some(time) = self.status_time {
+    //                 if time.elapsed() >= Duration::from_secs(3) {
+    //                     self.clear_status();
+    //                 }
+    //             }
+    //         }
+    //     }
+    //
+    //     // flush any pending terminal events before exiting
+    //     while event::poll(Duration::from_millis(0))? {
+    //         let _ = event::read()?;
+    //     }
+    //
+    //     execute!(stdout, DisableMouseCapture, terminal::LeaveAlternateScreen)?;
+    //     terminal::disable_raw_mode()?;
+    //
+    //     // reset cursor color on exit
+    //     print!("\x1b]112\x07");
+    //     let _ = io::Write::flush(&mut io::stdout());
+    //
+    //     Ok(())
+    // }
 
 
     pub(crate) fn process_keypress(&mut self) -> io::Result<()> {
