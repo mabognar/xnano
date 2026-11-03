@@ -100,7 +100,7 @@ impl ConfigExt for Editor {
             Some(new_dir)
         }
     }
-    
+
     fn get_config_path() -> Option<PathBuf> {
         Self::get_base_dir().map(|p| p.join("xnanorc"))
     }

@@ -20,6 +20,7 @@ serde_json = "1.0"
 webbrowser = "0.8"
 regex = "1.10"
 arboard = "3.4"
+logos = "0.14"
 
 [package.metadata.deb]
 maintainer = "Matt Bognar <mattbognar@gmail.com>"
