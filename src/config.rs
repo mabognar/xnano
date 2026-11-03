@@ -59,18 +59,48 @@ impl ConfigExt for Editor {
     }
 
 
+    // fn get_base_dir() -> Option<PathBuf> {
+    //     let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
+    //     if home.is_empty() {
+    //         None
+    //     } else {
+    //         let path = Path::new(&home).join(".xnano");
+    //         let _ = fs::create_dir_all(&path);
+    //         Some(path)
+    //     }
+    // }
+
+    // fn get_base_dir() -> Option<PathBuf> {
+    //     let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
+    //     if home.is_empty() {
+    //         None
+    //     } else {
+    //         let path = Path::new(&home).join(".config").join("xnano");
+    //         let _ = fs::create_dir_all(&path);
+    //         Some(path)
+    //     }
+    // }
+
     fn get_base_dir() -> Option<PathBuf> {
         let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
         if home.is_empty() {
             None
         } else {
-            let path = Path::new(&home).join(".xnano");
-            let _ = fs::create_dir_all(&path);
-            Some(path)
+            let new_dir = Path::new(&home).join(".config").join("xnano");
+            let _ = fs::create_dir_all(&new_dir);
+
+            // Migrate custom dictionary from the old location if it exists
+            let old_dict = Path::new(&home).join(".xnano").join("custom_dict.txt");
+            let new_dict = new_dir.join("custom_dict.txt");
+
+            if old_dict.exists() && !new_dict.exists() {
+                let _ = fs::rename(&old_dict, &new_dict);
+            }
+
+            Some(new_dir)
         }
     }
-
-
+    
     fn get_config_path() -> Option<PathBuf> {
         Self::get_base_dir().map(|p| p.join("xnanorc"))
     }
