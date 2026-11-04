@@ -23,6 +23,7 @@ pub trait MovementExt {
     fn page_down(&mut self) -> io::Result<()>;
     fn page_up(&mut self) -> io::Result<()>;
     fn scroll(&mut self) -> io::Result<()>;
+    fn go_to_matching_bracket(&mut self);
 }
 
 
@@ -81,6 +82,68 @@ impl MovementExt for Editor {
             }
         }
         Ok(())
+    }
+
+
+    fn go_to_matching_bracket(&mut self) {
+        let len = self.buffer.len_chars();
+        if len == 0 { return; }
+
+        let idx = self.get_cursor_char_idx();
+        if idx >= len { return; }
+
+        let current_char = self.buffer.char(idx);
+        let brackets = [('(', ')'), ('[', ']'), ('{', '}')];
+
+        // check if we are on an opening bracket (search forward)
+        for &(open, close) in &brackets {
+            if current_char == open {
+                let mut depth = 1;
+                for i in (idx + 1)..len {
+                    let c = self.buffer.char(i);
+                    if c == open { depth += 1; }
+                    else if c == close {
+                        depth -= 1;
+                        if depth == 0 {
+                            self.cursor_y = self.buffer.char_to_line(i);
+                            self.cursor_x = i - self.buffer.line_to_char(self.cursor_y);
+                            self.desired_cursor_x = self.cursor_x;
+                            self.set_status(String::from("Jumped to matching bracket"));
+                            return;
+                        }
+                    }
+                }
+                self.set_status(String::from("No matching closing bracket found"));
+                return;
+            }
+        }
+
+        // check if we are on a closing bracket (search backward)
+        for &(open, close) in &brackets {
+            if current_char == close {
+                let mut depth = 1;
+                let mut i = idx;
+                while i > 0 {
+                    i -= 1;
+                    let c = self.buffer.char(i);
+                    if c == close { depth += 1; }
+                    else if c == open {
+                        depth -= 1;
+                        if depth == 0 {
+                            self.cursor_y = self.buffer.char_to_line(i);
+                            self.cursor_x = i - self.buffer.line_to_char(self.cursor_y);
+                            self.desired_cursor_x = self.cursor_x;
+                            self.set_status(String::from("Jumped to matching bracket"));
+                            return;
+                        }
+                    }
+                }
+                self.set_status(String::from("No matching opening bracket found"));
+                return;
+            }
+        }
+
+        self.set_status(String::from("Not on a bracket"));
     }
 
 

@@ -59,28 +59,6 @@ impl ConfigExt for Editor {
     }
 
 
-    // fn get_base_dir() -> Option<PathBuf> {
-    //     let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
-    //     if home.is_empty() {
-    //         None
-    //     } else {
-    //         let path = Path::new(&home).join(".xnano");
-    //         let _ = fs::create_dir_all(&path);
-    //         Some(path)
-    //     }
-    // }
-
-    // fn get_base_dir() -> Option<PathBuf> {
-    //     let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
-    //     if home.is_empty() {
-    //         None
-    //     } else {
-    //         let path = Path::new(&home).join(".config").join("xnano");
-    //         let _ = fs::create_dir_all(&path);
-    //         Some(path)
-    //     }
-    // }
-
     fn get_base_dir() -> Option<PathBuf> {
         let home = env::var("HOME").or_else(|_| env::var("USERPROFILE")).unwrap_or_default();
         if home.is_empty() {
@@ -101,6 +79,7 @@ impl ConfigExt for Editor {
         }
     }
 
+    
     fn get_config_path() -> Option<PathBuf> {
         Self::get_base_dir().map(|p| p.join("xnanorc"))
     }
@@ -246,3 +225,5 @@ impl ConfigExt for Editor {
     }
     
 }
+
+

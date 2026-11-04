@@ -1,11 +1,11 @@
 [package]
 name = "xnano"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 license = "MIT"
 keywords = ["text", "editor", "terminal", "tui", "syntax"]
 categories = ["text-editors"]
-description = "Terminal text editor - efficient, easy-to-use, modern features. Tested with macOS, Linux, Windows, BSD."
+description = "Terminal text editor, easy-to-use, modern features. Tested with macOS, Linux, Windows, BSD."
 readme = true
 documentation = "https://docs.rs/xnano"
 repository = "https://github.com/mabognar/xnano"

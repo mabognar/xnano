@@ -56,6 +56,7 @@ impl HelpExt for Editor {
             "    M+M                    Mark current line",
             "    M+,                    Move to previous mark",
             "    M+.                    Move to next mark",
+            "    ^], M+]                Go to matching bracket",
             "",
             "  Editing:",
             "    M+U          Undo last action",

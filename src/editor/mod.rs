@@ -116,21 +116,6 @@ impl BufferState {
 
 impl Editor {
 
-    // pub fn new(filenames: Vec<String>) -> Self {
-    //     // deduplicate incoming files using canonical paths
-    //     let mut unique_files = Vec::new();
-    //     let mut seen_paths = HashSet::new();
-    //
-    //     for fname in filenames {
-    //         let expanded = Self::expand_tilde(&fname);
-    //         let target = Path::new(&expanded);
-    //         let canon = fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
-    //
-    //         if seen_paths.insert(canon) {
-    //             unique_files.push(fname);
-    //         }
-    //     }
-
     pub fn new(filenames: Vec<String>) -> Self {
         // deduplicate incoming files using canonical paths
         let mut unique_files = Vec::new();
@@ -167,11 +152,6 @@ impl Editor {
             Rope::new()
         };
 
-        // // load remaining files into the background queue
-        // let mut inactive_buffers = VecDeque::new();
-        // for fname in unique_files.into_iter().skip(1) {
-        //     inactive_buffers.push_back(BufferState::new(Some(fname)));
-        // }
 
         // load remaining files into the background queue
         let mut inactive_buffers = VecDeque::new();
@@ -179,10 +159,10 @@ impl Editor {
             inactive_buffers.push_back(BufferState::new(Some(fname)));
         }
 
-        // ADDED: Clamp the cursor to the actual file length
+        // clamp the cursor to the actual file length
         let max_y = buffer.len_lines().saturating_sub(1);
         let initial_cursor_y = if buffer.len_lines() > 0 { start_line.min(max_y) } else { 0 };
-        // Basic centering logic for the initial view offset
+        // basic centering logic for the initial view offset
         let initial_row_offset = initial_cursor_y.saturating_sub(15);
 
         let mut theme_set = ThemeSet::load_defaults();
@@ -190,10 +170,12 @@ impl Editor {
         let mut error_occurred = None;
 
         if let Some(theme_dir) = Self::get_themes_dir() {
+            // Load existing .tmTheme files
             if let Ok(custom_themes) = ThemeSet::load_from_folder(&theme_dir) {
                 themes_found += custom_themes.themes.len();
                 theme_set.themes.extend(custom_themes.themes);
             }
+
         }
 
         match ThemeSet::load_from_folder("../../themes") {
@@ -349,81 +331,6 @@ impl Editor {
         Ok(())
     }
 
-    // pub fn run(&mut self) -> io::Result<()> {
-    //     terminal::enable_raw_mode()?;
-    //     let mut stdout = io::stdout();
-    //
-    //     execute!(stdout, terminal::EnterAlternateScreen)?;
-    //     if self.mouse_enabled {
-    //         execute!(stdout, EnableMouseCapture)?;
-    //     }
-    //
-    //     loop {
-    //         // check for update in background
-    //         if let Some(rx) = &self.update_rx {
-    //             if let Ok(version) = rx.try_recv() {
-    //                 self.update_version = Some(version.clone());
-    //                 self.set_status(format!("Press Meta+V (Alt+V) to update xnano to version {}", version));
-    //                 self.update_rx = None; // Stop checking
-    //             }
-    //         }
-    //
-    //         // expire old status messages
-    //         if let Some(time) = self.status_time {
-    //             if time.elapsed() >= Duration::from_secs(10) {
-    //                 self.clear_status();
-    //             }
-    //         }
-    //
-    //         self.draw_screen()?;
-    //         if self.should_quit {
-    //             break;
-    //         }
-    //
-    //         // calculate how long to sleep before repolling
-    //         let mut timeout = if let Some(time) = self.status_time {
-    //             let elapsed = time.elapsed();
-    //             if elapsed >= Duration::from_secs(3) {
-    //                 Duration::from_millis(1)
-    //             } else {
-    //                 Duration::from_secs(3) - elapsed
-    //             }
-    //         } else {
-    //             Duration::from_secs(3600)
-    //         };
-    //
-    //         // wake every 250ms to check the background thread
-    //         if self.update_rx.is_some() {
-    //             timeout = timeout.min(Duration::from_millis(250));
-    //         }
-    //
-    //         // wait for event
-    //         if event::poll(timeout)? {
-    //             self.process_keypress()?;
-    //         } else {
-    //             if let Some(time) = self.status_time {
-    //                 if time.elapsed() >= Duration::from_secs(3) {
-    //                     self.clear_status();
-    //                 }
-    //             }
-    //         }
-    //     }
-    //
-    //     // flush any pending terminal events before exiting
-    //     while event::poll(Duration::from_millis(0))? {
-    //         let _ = event::read()?;
-    //     }
-    //
-    //     execute!(stdout, DisableMouseCapture, terminal::LeaveAlternateScreen)?;
-    //     terminal::disable_raw_mode()?;
-    //
-    //     // reset cursor color on exit
-    //     print!("\x1b]112\x07");
-    //     let _ = io::Write::flush(&mut io::stdout());
-    //
-    //     Ok(())
-    // }
-
 
     pub(crate) fn process_keypress(&mut self) -> io::Result<()> {
         let event = event::read()?;
@@ -568,6 +475,9 @@ impl Editor {
                     KeyCode::Down => self.move_down(),
                     KeyCode::Left => self.move_left(),
                     KeyCode::Right => self.move_right(),
+
+                    KeyCode::Char(']') if is_ctrl => self.go_to_matching_bracket(),
+                    KeyCode::Char(']') if is_alt => self.go_to_matching_bracket(),
 
                     KeyCode::Char(c) if !is_ctrl && !is_alt => {
                         let idx = self.get_cursor_char_idx();

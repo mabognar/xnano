@@ -473,7 +473,7 @@ impl RenderExt for Editor {
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 2, cols, col_width, &menu1, ui_bg, menu_key_fg, menu_text_fg)?;
                 let menu2 = [
-                    ("M+R", " Redo"), (" ^L", " To Line"), ("^D", " Delete"), ("", ""), ("M+.", " Next Mrk"), (" ^H", " Help")
+                    ("M+R", " Redo"), (" ^L", " To Line"), ("^D", " Delete"), ("M+]", " Go Brkt"), ("M+.", " Next Mrk"), (" ^H", " Help")
                 ];
                 Self::draw_menu_line(&mut stdout, rows - 1, cols, col_width, &menu2, ui_bg, menu_key_fg, menu_text_fg)?;
             }
