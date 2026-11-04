@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>name</key>
+    <string>Claude Light</string>
+    <key>settings</key>
+    <array>
+        <!-- Global Settings -->
+        <dict>
+            <key>settings</key>
+            <dict>
+                <key>background</key>
+                <string>#f5f0e6</string>
+                <key>foreground</key>
+                <string>#1f1e1d</string>
+                <key>caret</key>
+                <string>#c15f3c</string>
+                <key>selection</key>
+                <string>#e6dfd1</string>
+                <key>selectionForeground</key>
+                <string>#1f1e1d</string>
+            </dict>
+        </dict>
+        <!-- Comments -->
+        <dict>
+            <key>name</key>
+            <string>Comment</string>
+            <key>scope</key>
+            <string>comment</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>#a09d93</string>
+            </dict>
+        </dict>
+        <!-- Strings -->
+        <dict>
+            <key>name</key>
+            <string>String</string>
+            <key>scope</key>
+            <string>string</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>#788c5d</string>
+            </dict>
+        </dict>
+        <!-- Numbers & Constants -->
+        <dict>
+            <key>name</key>
+            <string>Number</string>
+            <key>scope</key>
+            <string>constant.numeric, constant.language</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>#a67235</string>
+            </dict>
+        </dict>
+        <!-- Keywords (Terracotta) -->
+        <dict>
+            <key>name</key>
+            <string>Keyword</string>
+            <key>scope</key>
+            <string>keyword, keyword.control</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>#c15f3c</string>
+            </dict>
+        </dict>
+        <!-- Functions (Soft Blue) -->
+        <dict>
+            <key>name</key>
+            <string>Function name</string>
+            <key>scope</key>
+            <string>entity.name.function</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>#5a82a6</string>
+            </dict>
+        </dict>
+        <!-- Types / Classes -->
+        <dict>
+            <key>name</key>
+            <string>Type</string>
+            <key>scope</key>
+            <string>entity.name.type, support.type</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>#9b6e4a</string>
+            </dict>
+        </dict>
+        <!-- Variables -->
+        <dict>
+            <key>name</key>
+            <string>Variable</string>
+            <key>scope</key>
+            <string>variable</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>#1f1e1d</string>
+            </dict>
+        </dict>
+    </array>
+</dict>
+</plist>
