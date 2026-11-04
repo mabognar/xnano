@@ -32,6 +32,6 @@ cargo install xnano
       in your terminal settings
 ### Configuration
     - Mouse is supported for some actions
-    - Settings are stored in ~/.xnano/xnanorc
-    - Themes are stored in ~/.xnano/themes
-    - Additional .tmTheme themes can be added to ~/.xnano/themes
+    - Settings are stored in ~/.config/xnano/xnanorc
+    - Themes are stored in ~/.config/xnano/themes
+    - Additional .tmTheme themes can be added to ~/.config/xnano/themes
